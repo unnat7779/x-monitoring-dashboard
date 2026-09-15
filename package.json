@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node scripts/stream-listener.mjs & next start",
     "stream": "node scripts/stream-listener.mjs",
     "lint": "eslint"
   },
