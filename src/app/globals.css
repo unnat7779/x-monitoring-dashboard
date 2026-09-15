@@ -1,0 +1,189 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════════════
+   X-BRANDED MINIMAL PROFESSIONAL DESIGN SYSTEM
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Premium X Theme: Deep near-black background, clean minimal elements */
+  --bg-app: #0a0a0c;
+  --bg-surface: #111114;
+  --bg-surface-raised: #1c1d21;
+  --bg-surface-card: rgba(17, 17, 20, 0.7);
+  --bg-surface-card-hover: rgba(28, 29, 33, 0.9);
+  
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-medium: rgba(255, 255, 255, 0.15);
+  --border-focus: #3b82f6; /* Cool blue accent */
+  
+  --text-primary: #f3f4f6;
+  --text-secondary: rgba(255, 255, 255, 0.55);
+  --text-muted: rgba(255, 255, 255, 0.4);
+  --text-dim: rgba(255, 255, 255, 0.2);
+
+  --accent-primary: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.2);
+
+  /* Standardized Category Colors */
+  --cat-news: #3b82f6; /* Blue for News Wires */
+  --cat-finance: #10b981; /* Green for Financial Media */
+  --cat-analyst: #8b5cf6; /* Purple for Analysts */
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--bg-app);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Custom Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* ── Utilities ── */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ── Animations ── */
+@keyframes slideDownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0);
+  }
+}
+
+@keyframes pulsePriority {
+  0%, 100% {
+    background-color: rgba(239, 68, 68, 0.1); /* Red pulse for priority */
+  }
+  50% {
+    background-color: rgba(239, 68, 68, 0.25);
+  }
+}
+
+@keyframes tickerMarquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-slide-down {
+  animation: slideDownIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-pulse-live {
+  animation: pulseGlow 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+.animate-pulse-priority {
+  animation: pulsePriority 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+/* ── Glassmorphism Surface ── */
+.glass-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.glass-panel:hover {
+  border-color: var(--border-medium);
+}
+
+/* ── Tweet Card Styling ── */
+.tweet-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  padding: 1rem;
+}
+
+.tweet-card:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border-medium);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+/* ── Masking for horizontal scroll and ticker overflow ── */
+.mask-fade-right {
+  mask-image: linear-gradient(to right, black 80%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+}
+
+.mask-fade-edges {
+  mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
+}
+
+/* ── Font mono utilities ── */
+.font-mono-tight {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
+/* ── Shimmer Loading ── */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.02) 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmerAnim 1.5s infinite;
+}
+
+@keyframes shimmerAnim {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

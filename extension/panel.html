@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>X Monitor — Real-Time Panel</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-group">
+        <div class="logo-icon">𝕏</div>
+        <div class="logo-title">
+          <span class="title-text">X Monitor</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Count Toggle (3 vs 5) -->
+        <div class="count-toggle">
+          <button id="btn-count-3" class="count-btn active">3</button>
+          <button id="btn-count-5" class="count-btn">5</button>
+        </div>
+      </div>
+    </header>
+
+
+
+
+    <!-- Real-time Update Alert Banner -->
+    <div id="update-toast" class="update-toast hidden">
+      <span class="toast-content">
+        <span class="pulse-dot"></span>
+        <span id="toast-message">New breaking post received</span>
+      </span>
+      <button id="toast-close" class="toast-close">✕</button>
+    </div>
+
+    <!-- Feed List -->
+    <main id="feed-container" class="feed-container">
+      <!-- Loading Skeleton -->
+      <div id="skeleton-loader" class="skeleton-list">
+        <div class="skeleton-card">
+          <div class="skeleton-header">
+            <div class="skeleton-avatar"></div>
+            <div class="skeleton-title"></div>
+          </div>
+          <div class="skeleton-body"></div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-header">
+            <div class="skeleton-avatar"></div>
+            <div class="skeleton-title"></div>
+          </div>
+          <div class="skeleton-body"></div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-header">
+            <div class="skeleton-avatar"></div>
+            <div class="skeleton-title"></div>
+          </div>
+          <div class="skeleton-body"></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Bottom Footer -->
+    <footer class="footer">
+      <div class="footer-status">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="post-count-label">Connecting...</span>
+      </div>
+      <a id="link-full-terminal" href="https://x-monitoring-dashboard.onrender.com" target="_blank" class="full-terminal-link">
+        <span>Open Full Terminal</span>
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+      </a>
+    </footer>
+  </div>
+
+  <script src="panel.js"></script>
+</body>
+</html>
