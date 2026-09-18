@@ -113,7 +113,12 @@ async function pollTweets() {
   if (isPaused) return;
 
   try {
-    const res = await fetch(getApiUrl());
+    const headers = {};
+    if (lastFeedHash) {
+      headers['If-None-Match'] = `"${lastFeedHash}"`;
+    }
+    const res = await fetch(getApiUrl(), { headers });
+    if (res.status === 304) return; // Feed has not changed — 0 bytes payload!
     if (!res.ok) throw new Error(`API returned ${res.status}`);
     const data = await res.json();
     const tweets = data.tweets || [];

@@ -37,6 +37,21 @@ export async function GET(request) {
       hash = ((hash << 5) + hash + feedHash.charCodeAt(i)) >>> 0;
     }
 
+    const hashStr = String(hash);
+    const clientHash = request.headers.get('if-none-match') || searchParams.get('hash');
+
+    // If client already has this exact feed version, return 304 Not Modified (0 bytes payload!)
+    if (clientHash && (clientHash === hashStr || clientHash === `"${hashStr}"`)) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          'ETag': `"${hashStr}"`,
+          'X-Feed-Hash': hashStr,
+          'Cache-Control': 'no-cache',
+        },
+      });
+    }
+
     const now = new Date().toISOString();
 
     return NextResponse.json(
@@ -44,12 +59,13 @@ export async function GET(request) {
         tweets,
         count: tweets.length,
         timestamp: now,
-        feedHash: String(hash),
+        feedHash: hashStr,
       },
       {
         headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-          'X-Feed-Hash': String(hash),
+          'Cache-Control': 'no-cache',
+          'ETag': `"${hashStr}"`,
+          'X-Feed-Hash': hashStr,
           'X-Feed-Timestamp': now,
         },
       }
