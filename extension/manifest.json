@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "X Monitor \u2014 Real-Time Panel",
-  "version": "5.2.0",
-  "description": "Real-time breaking market intelligence & newswire feed from Indian financial media and analysts on X / Twitter. Reads from a local backend on this machine.",
+  "version": "5.3.0",
+  "description": "Real-time breaking market intelligence & newswire feed from Indian financial media and analysts on X / Twitter. Active 9:00 AM – 3:30 PM IST; idle otherwise.",
   "permissions": [
     "storage",
     "notifications",
@@ -12,7 +12,9 @@
   "host_permissions": [
     "https://x-monitoring-dashboard.vercel.app/*",
     "http://127.0.0.1:3000/*",
-    "http://localhost:3000/*"
+    "http://localhost:3000/*",
+    "https://*.pusher.com/*",
+    "wss://*.pusher.com/*"
   ],
   "background": {
     "service_worker": "background.js"

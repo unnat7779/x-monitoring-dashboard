@@ -1,309 +1,83 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // X Monitor — Panel Window Script
-// Connects to background via long-lived port, renders tweet feed,
-// handles keepalive pings, and provides full UI interaction.
+//
+// A pure view. The background worker owns every decision (when to poll, mode
+// changes, the 5-minute ON window, the 08:55 daily purge). This file paints
+// what the worker sends over a long-lived port and forwards button presses.
+// It never touches the network and never writes state to storage.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ── Monitored Accounts Metadata ──────────────────────────────────────────
+// ── Monitored accounts (display metadata) ────────────────────────────────
 const MONITORED_ACCOUNTS = [
-  { handle: 'NDTVProfitIndia', name: 'NDTV Profit', category: 'Financial Media', tag: 'FINANCIAL NEWS', color: '#10b981', verified: true },
-  { handle: 'NDTVProfit', name: 'NDTV Profit', category: 'Financial Media', tag: 'FINANCIAL NEWS', color: '#10b981', verified: true },
-  { handle: 'CNBCTV18News', name: 'CNBC-TV18', category: 'Financial Media', tag: 'BUSINESS NEWS', color: '#0284c7', verified: true },
-  { handle: 'CNBCTV18Live', name: 'CNBC-TV18 Live', category: 'Financial Media', tag: 'LIVE WIRE', color: '#0369a1', verified: true },
-  { handle: 'ETNOWlive', name: 'ET NOW', category: 'Financial Media', tag: 'MARKETS & DEALS', color: '#f59e0b', verified: true },
-  { handle: 'ZeeBusiness', name: 'Zee Business', category: 'Financial Media', tag: 'MARKETS HINDI', color: '#ef4444', verified: true },
-  { handle: 'moneycontrolcom', name: 'Moneycontrol', category: 'Financial Media', tag: 'FINANCE & STOCKS', color: '#10b981', verified: true },
-  { handle: 'livemint', name: 'Livemint', category: 'Financial Media', tag: 'ECONOMY & BIZ', color: '#f97316', verified: true },
-  { handle: 'bsindia', name: 'Business Standard', category: 'Financial Media', tag: 'PRINT & DIGITAL', color: '#e11d48', verified: true },
-  { handle: 'business', name: 'Bloomberg', category: 'Financial Media', tag: 'GLOBAL MARKETS', color: '#8b5cf6', verified: true },
-  { handle: 'ANI', name: 'ANI News', category: 'News Wire', tag: 'NEWS AGENCY', color: '#ef4444', verified: true },
-  { handle: 'PTI_News', name: 'PTI News', category: 'News Wire', tag: 'NEWS AGENCY', color: '#06b6d4', verified: true },
-  { handle: 'LiveLawIndia', name: 'Live Law', category: 'News Wire', tag: 'LEGAL & COURTS', color: '#f43f5e', verified: true },
-  { handle: 'YatinMota', name: 'Yatin Mota', category: 'Journalists & Analysts', tag: 'MARKETS & DEALS', color: '#34d399', verified: true },
-  { handle: 'darshanvmehta1', name: 'Darshan Mehta', category: 'Journalists & Analysts', tag: 'MARKETS & DEALS', color: '#38bdf8', verified: true },
-  { handle: 'SoumeetSarkar', name: 'Soumeet Sarkar', category: 'Journalists & Analysts', tag: 'IT & TECH DEALS', color: '#c084fc', verified: true },
-  { handle: 'SharadDubey_', name: 'Sharad Dubey', category: 'Journalists & Analysts', tag: 'EQUITY RESEARCH', color: '#fbbf24', verified: true },
-  { handle: 'LakshmanRoy1', name: 'Lakshman Roy', category: 'Journalists & Analysts', tag: 'POLICY & BUDGET', color: '#ec4899', verified: true },
-  { handle: 'shukla_tarun', name: 'Tarun Shukla', category: 'Journalists & Analysts', tag: 'INVESTIGATIVE', color: '#a855f7', verified: true },
+  { handle: 'NDTVProfitIndia', name: 'NDTV Profit', color: '#10b981' },
+  { handle: 'NDTVProfit', name: 'NDTV Profit', color: '#10b981' },
+  { handle: 'CNBCTV18News', name: 'CNBC-TV18', color: '#0284c7' },
+  { handle: 'CNBCTV18Live', name: 'CNBC-TV18 Live', color: '#0369a1' },
+  { handle: 'ETNOWlive', name: 'ET NOW', color: '#f59e0b' },
+  { handle: 'ZeeBusiness', name: 'Zee Business', color: '#ef4444' },
+  { handle: 'moneycontrolcom', name: 'Moneycontrol', color: '#10b981' },
+  { handle: 'livemint', name: 'Livemint', color: '#f97316' },
+  { handle: 'bsindia', name: 'Business Standard', color: '#e11d48' },
+  { handle: 'business', name: 'Bloomberg', color: '#8b5cf6' },
+  { handle: 'ANI', name: 'ANI News', color: '#ef4444' },
+  { handle: 'PTI_News', name: 'PTI News', color: '#ef4444' },
+  { handle: 'LiveLawIndia', name: 'Live Law', color: '#06b6d4' },
+  { handle: 'yatinmota', name: 'Yatin Mota', color: '#c084fc' },
+  { handle: 'darshanvmehta1', name: 'Darshan Mehta', color: '#c084fc' },
+  { handle: 'SoumeetSarkar', name: 'Soumeet Sarkar', color: '#c084fc' },
+  { handle: 'soumeet_sarkar', name: 'Soumeet Sarkar', color: '#c084fc' },
+  { handle: 'SharadDubey_', name: 'Sharad Dubey', color: '#c084fc' },
+  { handle: 'LakshmanRoy1', name: 'Lakshman Roy', color: '#c084fc' },
+  { handle: 'shukla_tarun', name: 'Tarun Shukla', color: '#c084fc' },
 ];
 
-function getAccountMeta(handleOrName) {
-  const clean = (handleOrName || '').toLowerCase().replace(/[@\s]/g, '');
-  const cleanNoUnderscore = clean.replace(/_/g, '');
-  const match = MONITORED_ACCOUNTS.find(
-    (acc) =>
-      acc.handle.toLowerCase() === clean ||
-      acc.handle.toLowerCase().replace(/_/g, '') === cleanNoUnderscore ||
-      acc.name.toLowerCase().replace(/\s/g, '') === clean ||
-      acc.name.toLowerCase().includes(clean)
-  );
+function getAccountMeta(tweet) {
+  const username = (tweet.author?.username || '').replace(/^@/, '');
+  const key = username.toLowerCase();
+  const match = MONITORED_ACCOUNTS.find((acc) => acc.handle.toLowerCase() === key);
   if (match) return match;
   return {
-    handle: (handleOrName || 'unknown').replace(/[@\s]/g, ''),
-    name: handleOrName || 'Unknown',
-    category: 'Monitored',
-    tag: 'LIVE FEED',
+    handle: username || 'unknown',
+    name: tweet.author?.name || username || 'Unknown',
     color: '#38bdf8',
-    verified: true,
   };
 }
 
-function resolveAccountForTweet(tweet) {
-  const { author, text } = tweet;
-  const rawUsername = author?.username || '';
-  const rawName = author?.name || '';
-  
-  // If we already have a known author, return it
-  if (rawUsername && rawUsername.toLowerCase() !== 'unknown') {
-    const meta = getAccountMeta(rawUsername);
-    if (meta.handle.toLowerCase() !== 'unknown') return meta;
-  }
-  if (rawName && rawName.toLowerCase() !== 'unknown') {
-    const meta = getAccountMeta(rawName);
-    if (meta.handle.toLowerCase() !== 'unknown') return meta;
-  }
+// ── Constants shared with the worker ─────────────────────────────────────
+const MANUAL_ON_MS = 5 * 60 * 1000;
+const COLLAPSED_HEIGHT_LIMIT = 64;
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const DAY_MS = 86400000;
+const PURGE_MIN = 8 * 60 + 55; // posts from before today's 08:55 IST are gone
 
-  // Smart fallback by text keywords if author is unknown or unparsed
-  const textLower = (text || '').toLowerCase();
-  if (textLower.includes('rupa yadav') || textLower.includes('moneycontrol') || textLower.includes('mc_')) {
-    return getAccountMeta('moneycontrolcom');
-  }
-  if (textLower.includes('ndtv') || textLower.includes('ndtvprofit')) {
-    return getAccountMeta('NDTVProfit');
-  }
-  if (textLower.includes('yatin') || textLower.includes('yatinmota')) {
-    return getAccountMeta('yatinmota');
-  }
-  if (textLower.includes('darshan') || textLower.includes('darshanvmehta')) {
-    return getAccountMeta('darshanvmehta1');
-  }
-  if (textLower.includes('soumeet') || textLower.includes('soumeetsarkar')) {
-    return getAccountMeta('SoumeetSarkar');
-  }
-  if (textLower.includes('livelaw') || textLower.includes('supreme court') || textLower.includes('high court')) {
-    return getAccountMeta('LiveLawIndia');
-  }
-
-  return getAccountMeta(rawUsername || rawName || 'Unknown');
+// Epoch ms of the most recent 08:55 IST at or before `now` (same as worker).
+function retentionCutoff(now = Date.now()) {
+  const istNow = now + IST_OFFSET_MS;
+  const istMidnight = Math.floor(istNow / DAY_MS) * DAY_MS;
+  let cutoff = istMidnight + PURGE_MIN * 60000;
+  if (cutoff > istNow) cutoff -= DAY_MS;
+  return cutoff - IST_OFFSET_MS;
 }
 
 // ── State ────────────────────────────────────────────────────────────────
-let state = {
+const state = {
   maxCount: 3,
   rawTweets: [],
-  monitorMode: 'auto', // 'auto' | 'on' | 'off'
-  manualOnTimestamp: 0,
+  mode: 'auto',        // 'auto' | 'on'
+  manualOnUntil: 0,    // epoch ms while ON
+  polling: false,      // worker's poll loop is running
+  connected: false,    // last poll succeeded
+  marketOpen: false,
+  nextEdge: 0,         // epoch ms of next 9:00 / 15:30 IST
 };
 
 let expandedPostId = null;
-let renderedTweetSignature = '';
-const COLLAPSED_HEIGHT_LIMIT = 64;
+let renderedSignature = '';
 
-// ── Port Connection ──────────────────────────────────────────────────────
-let port = null;
-let keepaliveTimerId = null;
-let reconnectAttempts = 0;
-const MAX_RECONNECT_DELAY = 30000;
-
-// ── Local Sync (no network) ──────────────────────────────────────────────
-// The background service worker owns the TwitterAPI.io WebSocket and persists
-// every ingested batch to chrome.storage.local. The panel paints from there on
-// open and listens for changes, so it stays current even if the port is dead.
-// The panel makes NO network requests — there is no backend to poll.
-const PORT_SILENCE_THRESHOLD_MS = 30000; // 30s quiet → re-read persisted state
-const PORT_SILENCE_CHECK_MS = 15000;
-const STORAGE_SYNC_DELAY_MS = 1200; // let the port win before storage applies
-
-let lastPortDataTime = 0;
-let storageSyncTimerId = null;
-let portIsHealthy = false;
-let backendConnected = false;
-
-function connectPort() {
-  try {
-    port = chrome.runtime.connect({ name: 'panel' });
-    reconnectAttempts = 0;
-    portIsHealthy = true;
-    console.log('[X-Monitor Panel] Port connected');
-
-    port.onMessage.addListener(handlePortMessage);
-
-    port.onDisconnect.addListener(() => {
-      console.log('[X-Monitor Panel] Port disconnected');
-      port = null;
-      portIsHealthy = false;
-      stopKeepalive();
-      loadFromStorage(); // fall back to whatever the worker last persisted
-      scheduleReconnect();
-    });
-
-    startKeepalive();
-  } catch (err) {
-    console.error('[X-Monitor Panel] Failed to connect port:', err);
-    portIsHealthy = false;
-    loadFromStorage();
-    scheduleReconnect();
-  }
-}
-
-function scheduleReconnect() {
-  reconnectAttempts++;
-  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), MAX_RECONNECT_DELAY);
-  console.log(`[X-Monitor Panel] Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts})`);
-  setTimeout(connectPort, delay);
-}
-
-function startKeepalive() {
-  stopKeepalive();
-  keepaliveTimerId = setInterval(() => {
-    if (port) {
-      try {
-        port.postMessage({ type: 'PING' });
-      } catch (e) {
-        console.warn('[X-Monitor Panel] Keepalive ping failed');
-        port = null;
-        portIsHealthy = false;
-        stopKeepalive();
-        loadFromStorage();
-        scheduleReconnect();
-      }
-    }
-  }, 20000);
-}
-
-function stopKeepalive() {
-  if (keepaliveTimerId) {
-    clearInterval(keepaliveTimerId);
-    keepaliveTimerId = null;
-  }
-}
-
-// ── Apply / Load Tweets ──────────────────────────────────────────────────
-function applyTweets(tweets, { force = false, announce = false } = {}) {
-  const incoming = Array.isArray(tweets) ? tweets : [];
-  const hadTweets = state.rawTweets.length > 0;
-  const previousTopId = state.rawTweets[0]?.id;
-
-  state.rawTweets = incoming;
-  renderFeed(force);
-  updatePostCount();
-
-  // Only announce when the top post actually changed, so a port message and a
-  // storage change describing the same batch can never double-chime.
-  if (announce && hadTweets && incoming[0]?.id && incoming[0].id !== previousTopId) {
-    showToast('New breaking post received');
-    playChime();
-  }
-}
-
-async function loadFromStorage(options) {
-  try {
-    const data = await chrome.storage.local.get(['tweetHistory', 'monitorMode', 'manualOnTimestamp']);
-    if (typeof data.manualOnTimestamp === 'number') {
-      state.manualOnTimestamp = data.manualOnTimestamp;
-    }
-    if (data.monitorMode) {
-      setModeUI(data.monitorMode, state.manualOnTimestamp);
-    }
-    if (Array.isArray(data.tweetHistory) && data.tweetHistory.length > 0) {
-      applyTweets(data.tweetHistory, options);
-    }
-  } catch (e) {
-    // Extension context may be invalid
-  }
-}
-
-// ── Storage Sync Fallback ────────────────────────────────────────────────
-// The worker writes tweetHistory before it posts to the port, so wait briefly
-// and only apply here if the port did not deliver the batch itself.
-try {
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !changes.tweetHistory) return;
-    const next = changes.tweetHistory.newValue;
-
-    if (storageSyncTimerId) clearTimeout(storageSyncTimerId);
-    storageSyncTimerId = setTimeout(() => {
-      storageSyncTimerId = null;
-      if (portIsHealthy && Date.now() - lastPortDataTime < STORAGE_SYNC_DELAY_MS) return;
-      applyTweets(next, { announce: true });
-    }, STORAGE_SYNC_DELAY_MS);
-  });
-} catch (e) {
-  // Extension context may be invalid
-}
-
-// ── Port Silence Watchdog ────────────────────────────────────────────────
-// A long silence means the worker was probably killed. Re-read persisted
-// state locally; reconnection is handled by the port's disconnect handler.
-setInterval(() => {
-  if (Date.now() - lastPortDataTime > PORT_SILENCE_THRESHOLD_MS) {
-    loadFromStorage();
-  }
-}, PORT_SILENCE_CHECK_MS);
-
-// ── Handle Incoming Port Messages ────────────────────────────────────────
-function handlePortMessage(msg) {
-  lastPortDataTime = Date.now();
-
-  if (msg.type === 'INIT' || msg.type === 'NEW_TWEETS') {
-    portIsHealthy = true;
-  }
-
-  switch (msg.type) {
-    case 'INIT':
-      state.rawTweets = msg.tweets || [];
-      if (typeof msg.connected === 'boolean') backendConnected = msg.connected;
-      if (typeof msg.manualOnTimestamp === 'number') state.manualOnTimestamp = msg.manualOnTimestamp;
-      if (msg.monitorMode) setModeUI(msg.monitorMode, state.manualOnTimestamp);
-      renderFeed(true);
-      updatePostCount();
-      break;
-
-    case 'MODE_CHANGED':
-      if (typeof msg.manualOnTimestamp === 'number') state.manualOnTimestamp = msg.manualOnTimestamp;
-      if (msg.mode) setModeUI(msg.mode, state.manualOnTimestamp);
-      if (msg.reason === 'auto_off_5min') {
-        showToast('Turned OFF after 5-min post-market limit');
-      } else if (msg.reason === 'market_open_9am') {
-        showToast('Auto-started for 9:00 AM market open');
-      }
-      break;
-
-    case 'NEW_TWEETS':
-      state.rawTweets = msg.tweets || [];
-      backendConnected = true;
-      renderFeed();
-      updatePostCount();
-      if (msg.newCount > 0) {
-        showToast(msg.newCount === 1
-          ? 'New breaking post received'
-          : `${msg.newCount} new posts received`
-        );
-        playChime();
-      }
-      // Clear badge since panel is open
-      try {
-        chrome.runtime.sendMessage({ type: 'CLEAR_BADGE' });
-      } catch (e) { /* extension context may be invalid */ }
-      break;
-
-    case 'HISTORY_CLEARED':
-      state.rawTweets = [];
-      renderedTweetSignature = '';
-      renderFeed(true);
-      updatePostCount();
-      break;
-
-    case 'BACKEND_STATUS':
-      backendConnected = Boolean(msg.connected);
-      updatePostCount();
-      break;
-  }
-}
-
-// ── UI Elements ──────────────────────────────────────────────────────────
+// ── DOM ──────────────────────────────────────────────────────────────────
 const feedContainer = document.getElementById('feed-container');
-const postCountLabel = document.getElementById('post-count-label');
+const statusLabel = document.getElementById('post-count-label');
+const statusDot = document.getElementById('status-dot');
 const updateToast = document.getElementById('update-toast');
 const toastMessage = document.getElementById('toast-message');
 const toastClose = document.getElementById('toast-close');
@@ -311,112 +85,214 @@ const btnCount3 = document.getElementById('btn-count-3');
 const btnCount5 = document.getElementById('btn-count-5');
 const btnModeAuto = document.getElementById('btn-mode-auto');
 const btnModeOn = document.getElementById('btn-mode-on');
-const btnModeOff = document.getElementById('btn-mode-off');
 
-let countdownInterval = null;
+// ═══════════════════════════════════════════════════════════════════════════
+// PORT TO THE WORKER
+// ═══════════════════════════════════════════════════════════════════════════
+
+const KEEPALIVE_MS = 20000;
+const SILENCE_LIMIT_MS = 75000; // no message this long → assume a stale port
+const MAX_RECONNECT_DELAY = 30000;
+
+let port = null;
+let keepaliveTimer = null;
+let reconnectAttempts = 0;
+let lastPortMessageAt = Date.now();
+
+function connectPort() {
+  try {
+    port = chrome.runtime.connect({ name: 'panel' });
+    reconnectAttempts = 0;
+    lastPortMessageAt = Date.now();
+    port.onMessage.addListener(handlePortMessage);
+    port.onDisconnect.addListener(() => {
+      void chrome.runtime.lastError;
+      port = null;
+      stopKeepalive();
+      scheduleReconnect();
+    });
+    startKeepalive();
+  } catch (err) {
+    port = null;
+    scheduleReconnect();
+  }
+}
+
+function scheduleReconnect() {
+  reconnectAttempts += 1;
+  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), MAX_RECONNECT_DELAY);
+  setTimeout(connectPort, delay);
+}
+
+function startKeepalive() {
+  stopKeepalive();
+  keepaliveTimer = setInterval(() => {
+    if (!port) return;
+    try {
+      port.postMessage({ type: 'PING' });
+    } catch (e) {
+      port = null;
+      stopKeepalive();
+      scheduleReconnect();
+    }
+  }, KEEPALIVE_MS);
+}
+
+function stopKeepalive() {
+  if (keepaliveTimer) clearInterval(keepaliveTimer);
+  keepaliveTimer = null;
+}
+
+// A port can occasionally go quiet without ever firing onDisconnect. If the
+// worker should be talking to us and hasn't, reconnect — INIT re-syncs us.
+setInterval(() => {
+  if (!port) return;
+  const expectTraffic = state.polling || state.mode === 'on';
+  if (expectTraffic && Date.now() - lastPortMessageAt > SILENCE_LIMIT_MS) {
+    try { port.disconnect(); } catch (e) { /* already gone */ }
+    port = null;
+    stopKeepalive();
+    connectPort();
+  }
+}, 15000);
+
+function sendToWorker(msg) {
+  if (port) {
+    try {
+      port.postMessage(msg);
+      return;
+    } catch (e) {
+      port = null;
+    }
+  }
+  try {
+    chrome.runtime.sendMessage(msg);
+  } catch (e) {
+    // extension context may be invalid
+  }
+}
+
+function handlePortMessage(msg) {
+  lastPortMessageAt = Date.now();
+  switch (msg.type) {
+    case 'INIT':
+      applyStatus(msg);
+      applyTweets(msg.tweets, 0);
+      break;
+    case 'STATUS':
+      applyStatus(msg);
+      if (msg.reason === 'manual_on_expired') showToast('Manual ON ended — back to Auto');
+      break;
+    case 'FEED':
+      applyTweets(msg.tweets, msg.newCount);
+      break;
+  }
+}
+
+function applyStatus(s) {
+  if (s.mode === 'auto' || s.mode === 'on') state.mode = s.mode;
+  if (typeof s.manualOnUntil === 'number') state.manualOnUntil = s.manualOnUntil;
+  if (typeof s.polling === 'boolean') state.polling = s.polling;
+  if (typeof s.connected === 'boolean') state.connected = s.connected;
+  if (typeof s.marketOpen === 'boolean') state.marketOpen = s.marketOpen;
+  if (typeof s.nextEdge === 'number') state.nextEdge = s.nextEdge;
+  renderModeButtons();
+  renderStatus();
+  renderFeed();
+}
+
+function applyTweets(tweets, newCount) {
+  const now = Date.now();
+  state.rawTweets = (Array.isArray(tweets) ? tweets : []).filter((t) => isFresh(t, now));
+  renderFeed();
+  renderStatus();
+  if (newCount > 0) {
+    showToast(newCount === 1 ? 'New breaking post received' : `${newCount} new posts received`);
+    playChime();
+  }
+}
+
+// Instant first paint from what the worker last persisted; the port's INIT
+// replaces it a moment later.
+async function paintFromStorage() {
+  try {
+    const data = await chrome.storage.local.get(['tweetHistory', 'mode', 'manualOnUntil']);
+    applyStatus({ mode: data.mode, manualOnUntil: data.manualOnUntil });
+    if (Array.isArray(data.tweetHistory)) applyTweets(data.tweetHistory, 0);
+  } catch (e) {
+    // extension context may be invalid
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODE CONTROLS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function changeMode(mode) {
+  // Optimistic paint; the worker's STATUS confirms (or corrects) it.
+  state.mode = mode;
+  state.manualOnUntil = mode === 'on' ? Date.now() + MANUAL_ON_MS : 0;
+  renderModeButtons();
+  renderStatus();
+  renderFeed();
+  sendToWorker({ type: 'SET_MODE', mode });
+}
+
+btnModeAuto.addEventListener('click', () => changeMode('auto'));
+btnModeOn.addEventListener('click', () => changeMode('on'));
+
+function remainingOnSeconds() {
+  return Math.max(0, Math.ceil((state.manualOnUntil - Date.now()) / 1000));
+}
 
 function formatCountdown(secs) {
-  if (secs == null || secs <= 0) return '0:00';
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
-function startCountdown(explicitTimestamp) {
-  if (explicitTimestamp) {
-    state.manualOnTimestamp = explicitTimestamp;
-  }
-  if (!state.manualOnTimestamp) {
-    state.manualOnTimestamp = Date.now();
-    chrome.storage.local.set({ manualOnTimestamp: state.manualOnTimestamp });
-  }
-
-  if (isMarketHours()) {
-    stopCountdown();
-    if (btnModeOn) btnModeOn.textContent = 'ON';
-    return;
-  }
-
-  const tick = () => {
-    if (state.monitorMode !== 'on') {
-      stopCountdown();
-      return;
-    }
-    const elapsedMs = Date.now() - state.manualOnTimestamp;
-    const remaining = Math.max(0, Math.ceil((5 * 60 * 1000 - elapsedMs) / 1000));
-
-    if (remaining <= 0) {
-      stopCountdown();
-      changeMode('off');
-    } else {
-      if (btnModeOn) btnModeOn.textContent = formatCountdown(remaining);
-      updateEmptyStateCountdown(remaining);
-    }
-  };
-
-  tick();
-  if (!countdownInterval) {
-    countdownInterval = setInterval(tick, 1000);
-  }
+function renderModeButtons() {
+  const on = state.mode === 'on';
+  btnModeAuto.classList.toggle('active', !on);
+  btnModeOn.classList.toggle('active', on);
+  btnModeOn.textContent = on ? formatCountdown(remainingOnSeconds()) : 'ON';
 }
 
-function updateEmptyStateCountdown(remaining) {
-  const subEl = document.querySelector('.empty-state-sub');
-  if (subEl && state.monitorMode === 'on' && state.rawTweets.length === 0) {
-    subEl.textContent = `Manual ON mode active · Auto-off in ${formatCountdown(remaining)}`;
-  }
+// 1s tick: countdown on the ON button, and the empty-state line that shows it.
+setInterval(() => {
+  if (state.mode !== 'on') return;
+  renderModeButtons();
+  renderStatus();
+  const sub = document.querySelector('.empty-state-sub[data-live-countdown]');
+  if (sub) sub.textContent = emptyStateSub();
+}, 1000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COUNT TOGGLE / TOAST / CHIME
+// ═══════════════════════════════════════════════════════════════════════════
+
+btnCount3.addEventListener('click', () => setMaxCount(3));
+btnCount5.addEventListener('click', () => setMaxCount(5));
+
+function setMaxCount(n) {
+  state.maxCount = n;
+  btnCount3.classList.toggle('active', n === 3);
+  btnCount5.classList.toggle('active', n === 5);
+  renderFeed(true);
 }
 
-function stopCountdown() {
-  if (countdownInterval) {
-    clearInterval(countdownInterval);
-    countdownInterval = null;
-  }
-  if (btnModeOn) btnModeOn.textContent = 'ON';
+let toastTimer = null;
+function showToast(message) {
+  toastMessage.textContent = message;
+  updateToast.classList.remove('hidden');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => updateToast.classList.add('hidden'), 3500);
 }
+toastClose.addEventListener('click', () => {
+  updateToast.classList.add('hidden');
+  if (toastTimer) clearTimeout(toastTimer);
+});
 
-function setModeUI(mode, timestamp) {
-  if (!['auto', 'on', 'off'].includes(mode)) return;
-  const previousMode = state.monitorMode;
-  state.monitorMode = mode;
-  if (btnModeAuto) btnModeAuto.classList.toggle('active', mode === 'auto');
-  if (btnModeOn) btnModeOn.classList.toggle('active', mode === 'on');
-  if (btnModeOff) btnModeOff.classList.toggle('active', mode === 'off');
-
-  if (mode === 'on') {
-    startCountdown(timestamp);
-  } else {
-    state.manualOnTimestamp = 0;
-    stopCountdown();
-  }
-
-  updatePostCount();
-  if (previousMode !== mode) {
-    renderFeed(true); // Only re-render feed and empty-state on actual mode change!
-  }
-}
-
-function changeMode(mode) {
-  const timestamp = mode === 'on' ? Date.now() : 0;
-  state.manualOnTimestamp = timestamp;
-  setModeUI(mode, timestamp);
-  try {
-    if (port) {
-      port.postMessage({ type: 'SET_MODE', mode, manualOnTimestamp: timestamp });
-    }
-    chrome.runtime.sendMessage({ type: 'SET_MODE', mode, manualOnTimestamp: timestamp });
-    chrome.storage.local.set({ monitorMode: mode, manualOnTimestamp: timestamp });
-  } catch (e) {
-    // context may be invalid
-  }
-}
-
-if (btnModeAuto) btnModeAuto.addEventListener('click', () => changeMode('auto'));
-if (btnModeOn) btnModeOn.addEventListener('click', () => changeMode('on'));
-if (btnModeOff) btnModeOff.addEventListener('click', () => changeMode('off'));
-
-
-// ── Audio Chime ──────────────────────────────────────────────────────────
 function playChime() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -431,172 +307,119 @@ function playChime() {
     osc.start();
     osc.stop(ctx.currentTime + 0.25);
   } catch (e) {
-    // Audio not available
+    // audio unavailable
   }
 }
 
-// ── Count Toggle ─────────────────────────────────────────────────────────
-btnCount3.addEventListener('click', () => {
-  btnCount3.classList.add('active');
-  btnCount5.classList.remove('active');
-  state.maxCount = 3;
-  renderFeed(true);
-});
+// ═══════════════════════════════════════════════════════════════════════════
+// STATUS FOOTER
+// ═══════════════════════════════════════════════════════════════════════════
 
-btnCount5.addEventListener('click', () => {
-  btnCount5.classList.add('active');
-  btnCount3.classList.remove('active');
-  state.maxCount = 5;
-  renderFeed(true);
-});
-
-// ── Toast ────────────────────────────────────────────────────────────────
-let toastTimer = null;
-
-function showToast(message) {
-  toastMessage.textContent = message || 'New breaking post received';
-  updateToast.classList.remove('hidden');
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => updateToast.classList.add('hidden'), 3500);
+function formatIstClock(epochMs) {
+  try {
+    return new Date(epochMs).toLocaleTimeString('en-IN', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Kolkata',
+    });
+  } catch {
+    return '9:00 am';
+  }
 }
 
-toastClose.addEventListener('click', () => {
-  updateToast.classList.add('hidden');
-  if (toastTimer) clearTimeout(toastTimer);
-});
-
-// ── Market Hours (9:00 AM - 3:30 PM IST Daily) ───────────────────────────
-function isMarketHours(date = new Date()) {
-  const utcMs = date.getTime() + date.getTimezoneOffset() * 60000;
-  const istDate = new Date(utcMs + 5.5 * 3600000);
-  const minutes = istDate.getHours() * 60 + istDate.getMinutes();
-  return minutes >= 540 && minutes <= 930;
-}
-
-// ── Post Count ───────────────────────────────────────────────────────────
-function updatePostCount() {
+function renderStatus() {
   const count = state.rawTweets.length;
-  const dot = document.getElementById('status-dot');
+  let text;
+  let dot = 'status-dot';
 
-  if (!backendConnected) {
-    postCountLabel.textContent = 'Local backend offline';
-    if (dot) dot.className = 'status-dot error';
-    return;
-  }
-
-  if (state.monitorMode === 'off') {
-    postCountLabel.textContent = 'Monitoring paused (Manual OFF)';
-    if (dot) dot.className = 'status-dot paused';
-    return;
-  }
-
-  if (state.monitorMode === 'on') {
-    postCountLabel.textContent = count === 0
-      ? 'Manual ON — waiting for posts'
-      : `${count} posts indexed (Manual ON)`;
-    if (dot) dot.className = 'status-dot';
-    return;
-  }
-
-  // Auto mode
-  if (dot) dot.className = 'status-dot';
-  if (count === 0) {
-    const isOffMarket = !isMarketHours();
-    postCountLabel.textContent = isOffMarket
-      ? 'Active 9:00 AM – 3:30 PM (Auto)'
-      : 'Connected — waiting for posts';
-    if (isOffMarket && dot) dot.className = 'status-dot paused';
+  if (state.mode === 'on') {
+    text = `Manual ON · ${formatCountdown(remainingOnSeconds())} left`;
+    if (!state.connected) dot += ' error';
+  } else if (!state.polling) {
+    if (state.marketOpen) text = 'Starting…';
+    else if (state.nextEdge) text = `Idle · resumes ${formatIstClock(state.nextEdge)} IST`;
+    else text = 'Idle';
+    dot += ' paused';
+  } else if (!state.connected) {
+    text = 'Backend unreachable — retrying';
+    dot += ' error';
   } else {
-    postCountLabel.textContent = `${count} posts indexed`;
+    text = count === 0 ? 'Live — waiting for posts' : `${count} post${count === 1 ? '' : 's'} today`;
   }
+
+  statusLabel.textContent = text;
+  statusDot.className = dot;
 }
 
-// ── Render Feed ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// FEED
+// ═══════════════════════════════════════════════════════════════════════════
+
+function isFresh(t, now = Date.now()) {
+  const ts = Date.parse(t?.created_at || '');
+  return !Number.isNaN(ts) && ts >= retentionCutoff(now);
+}
+
+function emptyStateSub() {
+  if (state.mode === 'on') {
+    return state.marketOpen
+      ? `Auto-off in ${formatCountdown(remainingOnSeconds())}`
+      : `Auto-off in ${formatCountdown(remainingOnSeconds())} · showing today's posts; new ones arrive 9:00 AM – 3:30 PM IST`;
+  }
+  return state.marketOpen ? '' : 'Market hours: Daily 9:00 AM – 3:30 PM (IST)';
+}
+
 function renderFeed(force = false) {
   const displayList = state.rawTweets.slice(0, state.maxCount);
-  const currentSignature = `${state.monitorMode}-${state.maxCount}-${displayList.map((t) => t.id).join(',')}`;
-
-  if (!force && currentSignature === renderedTweetSignature) {
+  const signature = `${state.mode}-${state.marketOpen}-${state.maxCount}-${displayList.map((t) => t.id).join(',')}`;
+  if (!force && signature === renderedSignature) {
     updateTimestampsOnly();
     return;
   }
-
-  renderedTweetSignature = currentSignature;
+  renderedSignature = signature;
 
   if (displayList.length === 0) {
-    const isOffMarket = !isMarketHours();
-    let title = 'Waiting for tweets...';
-    let sub = '';
-
-    if (state.monitorMode === 'off') {
-      title = 'Monitoring is paused';
-      sub = 'Click ON or Auto above to resume';
-    } else if (state.monitorMode === 'auto' && isOffMarket) {
-      title = 'New tweets will display between 9:00 AM – 3:30 PM';
-      sub = 'Market hours: Daily 9:00 AM – 3:30 PM (IST)';
-    } else if (state.rawTweets.length === 0) {
-      title = 'Waiting for tweets...';
-      let countdownText = '';
-      if (state.monitorMode === 'on' && !isMarketHours() && state.manualOnTimestamp) {
-        const elapsedMs = Date.now() - state.manualOnTimestamp;
-        const remaining = Math.max(0, Math.ceil((5 * 60 * 1000 - elapsedMs) / 1000));
-        countdownText = ` · Auto-off in ${formatCountdown(remaining)}`;
-      }
-      sub = state.monitorMode === 'on'
-        ? `Manual ON mode active${countdownText}`
-        : '';
-    } else {
-      title = 'No posts matching this filter';
+    let title = 'Waiting for posts…';
+    if (state.mode === 'auto' && !state.marketOpen) {
+      title = 'New posts will display between 9:00 AM – 3:30 PM';
     }
-
+    const sub = emptyStateSub();
     feedContainer.innerHTML = `
       <div class="empty-state">
         <div class="empty-state-icon">𝕏</div>
-        <p class="empty-state-title">${title}</p>
-        ${sub ? `<span class="empty-state-sub">${sub}</span>` : ''}
+        <p class="empty-state-title">${escapeHTML(title)}</p>
+        ${sub ? `<span class="empty-state-sub" ${state.mode === 'on' ? 'data-live-countdown' : ''}>${escapeHTML(sub)}</span>` : ''}
       </div>
     `;
     return;
   }
 
-  feedContainer.innerHTML = displayList.map((tweet, i) => createTweetCardHTML(tweet, i)).join('');
+  feedContainer.innerHTML = displayList.map(createTweetCardHTML).join('');
 
-  // Attach copy listeners
-  document.querySelectorAll('.copy-btn').forEach((btn) => {
+  feedContainer.querySelectorAll('.copy-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const text = btn.getAttribute('data-text');
-      navigator.clipboard.writeText(text);
+      navigator.clipboard.writeText(btn.dataset.text || '');
       btn.classList.add('copied');
-      btn.innerHTML = `<span>Copied!</span>`;
+      const label = btn.querySelector('span');
+      if (label) label.textContent = 'Copied!';
       setTimeout(() => {
         btn.classList.remove('copied');
-        btn.innerHTML = `
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-            <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-          </svg>
-          <span>Copy</span>
-        `;
+        if (label) label.textContent = 'Copy';
       }, 1500);
     });
   });
 
-  // Attach read-more listeners
-  document.querySelectorAll('.read-more-btn').forEach((btn) => {
+  feedContainer.querySelectorAll('.read-more-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const id = btn.getAttribute('data-id');
+      const id = btn.dataset.id;
       expandedPostId = expandedPostId === id ? null : id;
       measureAndApplyCardOverflow();
-
       if (expandedPostId) {
-        const targetCard = document.getElementById(`card-${expandedPostId}`);
-        if (targetCard) {
-          setTimeout(() => {
-            targetCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          }, 60);
-        }
+        const card = document.getElementById(`card-${expandedPostId}`);
+        if (card) setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
       }
     });
   });
@@ -604,110 +427,94 @@ function renderFeed(force = false) {
   measureAndApplyCardOverflow();
 }
 
-// ── Card Overflow Logic ──────────────────────────────────────────────────
 function measureAndApplyCardOverflow() {
-  document.querySelectorAll('.tweet-card').forEach((card) => {
+  feedContainer.querySelectorAll('.tweet-card').forEach((card) => {
     const id = card.id.replace('card-', '');
     const innerEl = document.getElementById(`inner-${id}`);
     const bodyEl = document.getElementById(`body-${id}`);
     const btnEl = document.getElementById(`rm-btn-${id}`);
     if (!innerEl || !bodyEl || !btnEl) return;
 
-    const naturalHeight = innerEl.scrollHeight;
-    const hasOverflow = naturalHeight > COLLAPSED_HEIGHT_LIMIT;
-
-    if (!hasOverflow) {
+    if (innerEl.scrollHeight <= COLLAPSED_HEIGHT_LIMIT) {
       btnEl.style.display = 'none';
       bodyEl.className = 'tweet-body-text';
-    } else {
-      btnEl.style.display = 'inline-flex';
-      const isExpanded = expandedPostId === id;
-
-      if (isExpanded) {
-        bodyEl.className = 'tweet-body-text expanded';
-        btnEl.classList.add('expanded');
-        btnEl.setAttribute('aria-expanded', 'true');
-        btnEl.querySelector('.rm-label').textContent = 'Show less';
-      } else {
-        bodyEl.className = 'tweet-body-text collapsed';
-        btnEl.classList.remove('expanded');
-        btnEl.setAttribute('aria-expanded', 'false');
-        btnEl.querySelector('.rm-label').textContent = 'Read more';
-      }
+      return;
     }
+    btnEl.style.display = 'inline-flex';
+    const isExpanded = expandedPostId === id;
+    bodyEl.className = `tweet-body-text ${isExpanded ? 'expanded' : 'collapsed'}`;
+    btnEl.classList.toggle('expanded', isExpanded);
+    btnEl.setAttribute('aria-expanded', String(isExpanded));
+    btnEl.querySelector('.rm-label').textContent = isExpanded ? 'Show less' : 'Read more';
   });
 }
 
-// Observe resize for dynamic overflow recalculation
 if (typeof ResizeObserver !== 'undefined') {
-  const resizeObserver = new ResizeObserver(() => {
-    measureAndApplyCardOverflow();
-  });
-  resizeObserver.observe(feedContainer);
+  new ResizeObserver(measureAndApplyCardOverflow).observe(feedContainer);
 }
 
-// ── Timestamp Updates ────────────────────────────────────────────────────
 function updateTimestampsOnly() {
-  document.querySelectorAll('.time-ago').forEach((el) => {
-    const dateStr = el.getAttribute('data-created');
-    if (dateStr) el.textContent = formatTweetTime(dateStr);
+  feedContainer.querySelectorAll('.time-ago').forEach((el) => {
+    const created = el.dataset.created;
+    if (created) el.textContent = formatTweetTime(created);
   });
 }
 
-// Update timestamps every 15s
-setInterval(updateTimestampsOnly, 15000);
+// Every 15s: refresh relative times, and at 08:55 drop yesterday's posts so
+// the panel is wiped on time even with no polling at that hour.
+setInterval(() => {
+  const now = Date.now();
+  const fresh = state.rawTweets.filter((t) => isFresh(t, now));
+  if (fresh.length !== state.rawTweets.length) {
+    state.rawTweets = fresh;
+    renderFeed();
+    renderStatus();
+  } else {
+    updateTimestampsOnly();
+  }
+}, 15000);
 
-// ── Create Tweet Card HTML ───────────────────────────────────────────────
-function createTweetCardHTML(tweet, index) {
-  const { author, text, media, id } = tweet;
-  // Live stream tweets carry `createdAt`; tweets cached by earlier builds
-  // (and the web dashboard shape) carry `created_at`.
-  const created_at = tweet.createdAt || tweet.created_at;
-  const rawUsername = author?.username || '';
-  const meta = resolveAccountForTweet(tweet);
+const VERIFIED_SVG = `
+  <svg viewBox="0 0 24 24" class="verified-icon" fill="currentColor">
+    <path d="m8.6 22.5-1.9-3.2-3.6-.8.4-3.7L1 12l2.5-2.8-.4-3.7 3.6-.8 1.9-3.2L12 2.9l3.4-1.4 1.9 3.2 3.6.8-.4 3.7L23 12l-2.5 2.8.4 3.7-3.6.8-1.9 3.2-3.4-1.4-3.4 1.4zm2.85-6.55 6.35-6.35-1.4-1.45-4.95 4.95-2.15-2.15-1.4 1.4 3.55 3.6z" />
+  </svg>`;
 
-  const formattedTime = formatTweetTime(created_at);
-  const cleanId = String(id || '').split('?')[0];
-  const tweetUrl = `https://x.com/${meta.handle || rawUsername}/status/${cleanId}`;
-
-  const mediaHTML =
-    media && media.length > 0
-      ? `<div class="media-preview"><img src="${media[0].preview_url || media[0].url}" alt="Tweet media"></div>`
-      : '';
-
-  const verifiedHTML = meta.verified
-    ? `
-    <svg viewBox="0 0 24 24" class="verified-icon" fill="currentColor">
-      <path d="m8.6 22.5-1.9-3.2-3.6-.8.4-3.7L1 12l2.5-2.8-.4-3.7 3.6-.8 1.9-3.2L12 2.9l3.4-1.4 1.9 3.2 3.6.8-.4 3.7L23 12l-2.5 2.8.4 3.7-3.6.8-1.9 3.2-3.4-1.4-3.4 1.4zm2.85-6.55 6.35-6.35-1.4-1.45-4.95 4.95-2.15-2.15-1.4 1.4 3.55 3.6z" />
-    </svg>
-  `
+// ── Card template — every dynamic value goes through escapeHTML ──────────
+function createTweetCardHTML(tweet) {
+  const meta = getAccountMeta(tweet);
+  const id = escapeHTML(tweet.id);
+  const created = escapeHTML(tweet.created_at);
+  const handle = escapeHTML(meta.handle);
+  const name = escapeHTML(meta.name);
+  const color = /^#[0-9a-f]{6}$/i.test(meta.color) ? meta.color : '#38bdf8';
+  const tweetUrl = escapeHTML(`https://x.com/${meta.handle}/status/${tweet.id}`);
+  const mediaUrl = tweet.media?.[0]?.url;
+  const mediaHTML = mediaUrl && /^https:\/\//i.test(mediaUrl)
+    ? `<div class="media-preview"><img src="${escapeHTML(mediaUrl)}" alt="Tweet media"></div>`
     : '';
 
-  const highlightedText = highlightEntities(text);
-
   return `
-    <article class="tweet-card" id="card-${id}" style="animation-delay: ${index * 0.04}s">
-      <div class="card-stripe" style="background-color: ${meta.color};"></div>
+    <article class="tweet-card" id="card-${id}">
+      <div class="card-stripe" style="background-color: ${color};"></div>
 
       <div class="card-header">
         <div class="author-info">
           <div class="author-names">
             <div class="name-row">
-              <span class="author-name">${meta.name}</span>
-              ${verifiedHTML}
+              <span class="author-name">${name}</span>
+              ${tweet.author?.verified ? VERIFIED_SVG : ''}
             </div>
-            <span class="author-handle">@${meta.handle}</span>
+            <span class="author-handle">@${handle}</span>
           </div>
         </div>
-
         <div class="meta-right">
-          <span class="time-ago" data-created="${created_at}">${formattedTime}</span>
+          <span class="time-ago" data-created="${created}">${escapeHTML(formatTweetTime(tweet.created_at))}</span>
         </div>
       </div>
 
-      <div class="tweet-body-wrap" id="body-wrap-${id}">
+      <div class="tweet-body-wrap">
         <div class="tweet-body-text" id="body-${id}">
-          <p class="tweet-body-inner" id="inner-${id}">${highlightedText}</p>
+          <p class="tweet-body-inner" id="inner-${id}">${highlightEntities(tweet.text)}</p>
         </div>
         <button type="button" class="read-more-btn" id="rm-btn-${id}" data-id="${id}" aria-expanded="false" aria-controls="body-${id}" style="display: none;">
           <span class="rm-label">Read more</span>
@@ -721,15 +528,14 @@ function createTweetCardHTML(tweet, index) {
       ${mediaHTML}
 
       <div class="card-footer">
-        <button class="copy-btn" data-text="${escapeHTML(text)}">
+        <button class="copy-btn" data-text="${escapeHTML(tweet.text)}">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
             <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
             <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
           </svg>
           <span>Copy</span>
         </button>
-
-        <a href="${tweetUrl}" target="_blank" class="open-x-link">
+        <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer" class="open-x-link">
           <span>See on 𝕏</span>
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5">
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -744,34 +550,19 @@ function createTweetCardHTML(tweet, index) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function formatTweetTime(dateStr) {
-  try {
-    const d = new Date(dateStr);
-    const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-    const diff = Math.floor((Date.now() - d.getTime()) / 1000);
-    let rel = 'now';
-    if (diff < 60) rel = `${diff}s`;
-    else if (diff < 3600) rel = `${Math.floor(diff / 60)}m`;
-    else if (diff < 86400) rel = `${Math.floor(diff / 3600)}h`;
-    else rel = `${Math.floor(diff / 86400)}d`;
-    return `${rel} • ${timeStr}`;
-  } catch {
-    return 'now';
-  }
-}
-
-function highlightEntities(text) {
-  if (!text) return '';
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/(#WATCH|#BREAKING|#BlockDealAlert)/gi, '<span class="highlight-breaking">$1</span>')
-    .replace(/(@\w+)/g, '<span class="highlight-entity">$1</span>')
-    .replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" class="highlight-entity">$1</a>');
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return 'now';
+  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+  const diff = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  let rel = `${diff}s`;
+  if (diff >= 86400) rel = `${Math.floor(diff / 86400)}d`;
+  else if (diff >= 3600) rel = `${Math.floor(diff / 3600)}h`;
+  else if (diff >= 60) rel = `${Math.floor(diff / 60)}m`;
+  return `${rel} • ${timeStr}`;
 }
 
 function escapeHTML(str) {
-  return (str || '')
+  return String(str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -779,43 +570,40 @@ function escapeHTML(str) {
     .replace(/'/g, '&#39;');
 }
 
+// Tokenise, then escape each piece. URLs are matched whole so an @mention
+// inside one can never be wrapped separately and corrupt the href.
+function highlightEntities(text) {
+  return String(text ?? '')
+    .split(/(https?:\/\/[^\s]+|@\w+|#\w+)/g)
+    .map((part) => {
+      const safe = escapeHTML(part);
+      if (/^https?:\/\//i.test(part)) {
+        return `<a href="${safe}" target="_blank" rel="noopener noreferrer" class="highlight-entity">${safe}</a>`;
+      }
+      if (/^#(WATCH|BREAKING|BlockDealAlert)$/i.test(part)) {
+        return `<span class="highlight-breaking">${safe}</span>`;
+      }
+      if (part.startsWith('@')) return `<span class="highlight-entity">${safe}</span>`;
+      return safe;
+    })
+    .join('');
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
-// INITIALIZATION
+// INIT
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Clear badge when panel opens
-try {
-  chrome.runtime.sendMessage({ type: 'CLEAR_BADGE' });
-} catch (e) { /* extension context may be invalid */ }
-
-// Paint immediately from the state the worker last persisted, then open the
-// live port. The panel never touches the network.
-lastPortDataTime = Date.now(); // grace period before the silence watchdog runs
-loadFromStorage({ force: true });
+paintFromStorage();
 connectPort();
 
-console.log('[X-Monitor Panel] Initialized (port + chrome.storage.local sync, no polling)');
-
-
-// ── Orphaned-window watchdog ─────────────────────────────────────────────
-// Reloading the extension in chrome://extensions invalidates THIS window's
-// runtime context. The window stays open and keeps rendering whatever it last
-// drew — forever, with no error — which is indistinguishable from a live panel
-// that has simply stopped receiving posts. Detect the dead context and say so
-// out loud instead of showing stale posts as if they were current.
+// The extension being reloaded from chrome://extensions kills this window's
+// runtime context but leaves the window open, silently frozen. Say so.
 (function watchForInvalidatedContext() {
   const BANNER_ID = 'xm-stale-banner';
-
-  function contextAlive() {
-    try {
-      return Boolean(chrome.runtime && chrome.runtime.id);
-    } catch {
-      return false;
-    }
-  }
-
   setInterval(() => {
-    if (contextAlive() || document.getElementById(BANNER_ID)) return;
+    let alive = false;
+    try { alive = Boolean(chrome.runtime && chrome.runtime.id); } catch { /* dead */ }
+    if (alive || document.getElementById(BANNER_ID)) return;
 
     const banner = document.createElement('div');
     banner.id = BANNER_ID;
@@ -824,22 +612,12 @@ console.log('[X-Monitor Panel] Initialized (port + chrome.storage.local sync, no
       'The extension was reloaded. Close this window and click the ' +
       'X Monitor toolbar icon to reopen it. Posts shown below are stale.';
     Object.assign(banner.style, {
-      position: 'fixed',
-      top: '0',
-      left: '0',
-      right: '0',
-      zIndex: '99999',
-      padding: '10px 14px',
-      background: '#b91c1c',
-      color: '#fff',
+      position: 'fixed', top: '0', left: '0', right: '0', zIndex: '99999',
+      padding: '10px 14px', background: '#b91c1c', color: '#fff',
       font: '12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-      textAlign: 'center',
-      boxShadow: '0 2px 12px rgba(0,0,0,.45)',
+      textAlign: 'center', boxShadow: '0 2px 12px rgba(0,0,0,.45)',
     });
     document.body.appendChild(banner);
-
-    // Grey out the stale cards so they can't be mistaken for live ones.
-    const feed = document.getElementById('feed-container');
-    if (feed) feed.style.opacity = '0.45';
+    feedContainer.style.opacity = '0.45';
   }, 3000);
 })();

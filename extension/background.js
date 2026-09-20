@@ -1,41 +1,71 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // X Monitor — Background Service Worker (MV3)
-// Polls the X Monitoring backend on Vercel (continuous, persistent),
-// deduplicates, notifies, badges, and pushes data to the panel window.
+//
+// Polls /api/tweets ONLY while it should:
+//   • Auto mode  → 9:00 AM – 3:30 PM IST, every day. Zero requests otherwise.
+//   • ON mode    → a 5-minute manual override, then back to Auto automatically.
+//
+// There is no OFF mode. Outside the window nothing runs: no timers, no fetches,
+// so the Vercel backend is never invoked and burns no credits.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Local backend only — no hosted service required.
-// 127.0.0.1 is tried first: on some machines `localhost` resolves to ::1 while
-// Next.js binds IPv4 only, which makes the `localhost` spelling fail outright.
 const PROD_ENDPOINT = 'https://x-monitoring-dashboard.vercel.app/api/tweets';
-const LOCAL_ENDPOINTS = [
+// Production first (the last deliberate choice), local dev server as fallback.
+// 127.0.0.1 before localhost: `localhost` can resolve to ::1 while Next binds v4.
+const ENDPOINTS = [
   PROD_ENDPOINT,
   'http://127.0.0.1:3000/api/tweets',
   'http://localhost:3000/api/tweets',
 ];
-const POLL_INTERVAL_MS = 1500;
-const BACKOFF_MAX_MS = 15000;
-const ALARM_NAME = 'xmonitor-heartbeat';
-const MAX_HISTORY = 200;
 
-// ── In-Memory State (rebuilt on wake from chrome.storage.local) ──────────
+const POLL_INTERVAL_MS = 10000;  // 10s — keeps us within Vercel's 100K/month free tier
+const BACKOFF_MAX_MS = 60000;    // back off up to 60s when backend is unreachable
+const FETCH_TIMEOUT_MS = 10000;
+const MAX_HISTORY = 50;              // the API sends at most this many anyway
+const MANUAL_ON_MS = 5 * 60 * 1000;  // ON override length
+
+// ── Pusher Real-Time Config ──────────────────────────────────────────────
+// Free tier: 200,000 msgs/day, instant sub-500ms delivery.
+// Once configured, updates arrive via WebSocket push instantly, and
+// polling is reduced to a gentle 60s fallback to conserve Vercel credits.
+let PUSHER_KEY = '48698da7e97d91ad655a';
+let PUSHER_CLUSTER = 'ap2';
+const PUSHER_CHANNEL = 'x-monitor';
+
+let pusherWs = null;
+let pusherConnected = false;
+let pusherReconnectTimer = null;
+
+// Market window, minutes since IST midnight. Half-open: [09:00, 15:30).
+// Retention: everything since the most recent 08:55 IST — yesterday's posts
+// vanish at 08:55 sharp, five minutes before the market opens.
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const DAY_MS = 86400000;
+const MARKET_OPEN_MIN = 9 * 60;
+const MARKET_CLOSE_MIN = 15 * 60 + 30;
+const PURGE_MIN = 8 * 60 + 55;
+
+const ALARM_HEARTBEAT = 'xmonitor-heartbeat';     // 30s safety net
+const ALARM_ON_EXPIRY = 'xmonitor-on-expiry';     // exact end of ON override
+const ALARM_MARKET_EDGE = 'xmonitor-market-edge'; // exact next 8:55 / 9:00 / 15:30
+
+// ── State (rebuilt from chrome.storage.local whenever the worker wakes) ──
+let mode = 'auto';        // 'auto' | 'on'
+let manualOnUntil = 0;    // epoch ms; 0 unless mode === 'on'
 let seenIds = new Set();
 let tweetHistory = [];
-let isPaused = false;
-let monitorMode = 'auto'; // 'auto' | 'on' | 'off'
-let manualOnTimestamp = 0; // When user switched to 'on'
-let lastAutoStartedDate = ''; // Prevents duplicate 9am auto-starts on the same day
 let unreadCount = 0;
+
 let panelWindowId = null;
 let panelPort = null;
-let pollTimerId = null;
-let activeEndpoint = LOCAL_ENDPOINTS[0];
-let customApiUrl = '';        // optional override, set from the panel/options
+let pollTimer = null;
+let activeEndpoint = ENDPOINTS[0];
 let consecutiveFailures = 0;
 let currentIntervalMs = POLL_INTERVAL_MS;
 let backendUp = false;
+let lastFeedHash = '';
 
-// ── Monitored Accounts Metadata (for notification titles) ────────────────
+// ── Monitored accounts (notification titles) ─────────────────────────────
 const ACCOUNT_META = {
   ndtvprofitindia: 'NDTV Profit',
   ndtvprofit: 'NDTV Profit',
@@ -53,6 +83,7 @@ const ACCOUNT_META = {
   yatinmota: 'Yatin Mota',
   darshanvmehta1: 'Darshan Mehta',
   soumeetsarkar: 'Soumeet Sarkar',
+  soumeet_sarkar: 'Soumeet Sarkar',
   sharaddubey_: 'Sharad Dubey',
   lakshmanroy1: 'Lakshman Roy',
   shukla_tarun: 'Tarun Shukla',
@@ -63,82 +94,98 @@ function getAccountName(username) {
   return ACCOUNT_META[key] || username || 'Unknown';
 }
 
-function getApiUrl() {
-  return customApiUrl || activeEndpoint;
+// ═══════════════════════════════════════════════════════════════════════════
+// MARKET CLOCK (IST has no DST, so a fixed offset is exact)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function istMinuteOfDay(now = Date.now()) {
+  const ist = new Date(now + IST_OFFSET_MS);
+  return ist.getUTCHours() * 60 + ist.getUTCMinutes();
 }
 
-function endpointCandidates() {
-  return customApiUrl ? [customApiUrl] : LOCAL_ENDPOINTS;
+function isMarketHours(now = Date.now()) {
+  const m = istMinuteOfDay(now);
+  return m >= MARKET_OPEN_MIN && m < MARKET_CLOSE_MIN;
 }
 
-// ── Market Hours (9:00 AM - 3:30 PM IST Daily) ───────────────────────────
-function getIstTime(date = new Date()) {
-  const utcMs = date.getTime() + date.getTimezoneOffset() * 60000;
-  const istDate = new Date(utcMs + 5.5 * 3600000);
-  const day = istDate.getDay();
-  const minutes = istDate.getHours() * 60 + istDate.getMinutes();
-  const isMarketDay = true; // Daily (Monday to Sunday)
-  const dateStr = istDate.toDateString();
-  return { istDate, day, minutes, isMarketDay, isWeekday: isMarketDay, dateStr };
+// Epoch ms of the next scheduled instant strictly after `now`:
+// 08:55 purge, 09:00 open or 15:30 close, whichever comes first.
+function nextEdge(now = Date.now()) {
+  const istNow = now + IST_OFFSET_MS;
+  const istMidnight = Math.floor(istNow / DAY_MS) * DAY_MS;
+  const edges = [
+    istMidnight + PURGE_MIN * 60000,
+    istMidnight + MARKET_OPEN_MIN * 60000,
+    istMidnight + MARKET_CLOSE_MIN * 60000,
+    istMidnight + DAY_MS + PURGE_MIN * 60000,
+  ];
+  return edges.find((t) => t > istNow) - IST_OFFSET_MS;
 }
 
-function isMarketHours(date = new Date()) {
-  const { minutes } = getIstTime(date);
-  return minutes >= 540 && minutes <= 930;
+// Epoch ms of the next 09:00 or 15:30 — what the panel shows as "resumes at".
+function nextMarketEdge(now = Date.now()) {
+  const istNow = now + IST_OFFSET_MS;
+  const istMidnight = Math.floor(istNow / DAY_MS) * DAY_MS;
+  const edges = [
+    istMidnight + MARKET_OPEN_MIN * 60000,
+    istMidnight + MARKET_CLOSE_MIN * 60000,
+    istMidnight + DAY_MS + MARKET_OPEN_MIN * 60000,
+  ];
+  return edges.find((t) => t > istNow) - IST_OFFSET_MS;
+}
+
+// Epoch ms of the most recent 08:55 IST at or before `now`.
+function retentionCutoff(now = Date.now()) {
+  const istNow = now + IST_OFFSET_MS;
+  const istMidnight = Math.floor(istNow / DAY_MS) * DAY_MS;
+  let cutoff = istMidnight + PURGE_MIN * 60000;
+  if (cutoff > istNow) cutoff -= DAY_MS;
+  return cutoff - IST_OFFSET_MS;
+}
+
+// The single source of truth for "should we be hitting the backend right now".
+function shouldPoll(now = Date.now()) {
+  if (mode === 'on') return now < manualOnUntil;
+  return isMarketHours(now);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PERSISTENCE — chrome.storage.local
+// PERSISTENCE
 // ═══════════════════════════════════════════════════════════════════════════
+
+const LEGACY_KEYS = ['isPaused', 'monitorMode', 'manualOnTimestamp', 'customApiUrl'];
 
 async function loadState() {
   try {
     const data = await chrome.storage.local.get([
+      'mode',
+      'manualOnUntil',
       'seenIds',
       'tweetHistory',
-      'isPaused',
-      'monitorMode',
-      'manualOnTimestamp',
       'unreadCount',
-      'customApiUrl',
+      'pusherKey',
+      'pusherCluster',
     ]);
-    if (typeof data.manualOnTimestamp === 'number') {
-      manualOnTimestamp = data.manualOnTimestamp;
+    if (typeof data.pusherKey === 'string' && data.pusherKey.trim()) {
+      PUSHER_KEY = data.pusherKey.trim();
     }
-    if (Array.isArray(data.seenIds)) {
-      seenIds = new Set(data.seenIds);
+    if (typeof data.pusherCluster === 'string' && data.pusherCluster.trim()) {
+      PUSHER_CLUSTER = data.pusherCluster.trim();
     }
-    // Deliberately NOT restoring data.tweetHistory. It is only a cache of a
-    // server we can re-read within ~1.5s, and painting it at startup is what
-    // made hours-old posts appear live behind a healthy-looking green dot.
-    // The panel now starts empty and fills from the first successful poll.
-    tweetHistory = [];
-
-    // Purge the persisted copy too. panel.js calls loadFromStorage() on boot
-    // and paints this key DIRECTLY, bypassing the worker entirely — so leaving
-    // it behind would repaint the old posts the instant a panel opens, no
-    // matter what the worker does.
-    try {
-      await chrome.storage.local.remove('tweetHistory');
-    } catch (e) {
-      console.warn('[X-Monitor BG] Could not purge cached tweetHistory:', e);
+    if (data.mode === 'on' || data.mode === 'auto') mode = data.mode;
+    if (typeof data.manualOnUntil === 'number') manualOnUntil = data.manualOnUntil;
+    if (mode === 'on' && manualOnUntil <= Date.now()) {
+      mode = 'auto';
+      manualOnUntil = 0;
     }
-    
-    if (data.monitorMode && ['auto', 'on', 'off'].includes(data.monitorMode)) {
-      monitorMode = data.monitorMode;
-    } else {
-      monitorMode = 'auto';
-    }
-    isPaused = (monitorMode === 'off');
-
-    // Always reset unreadCount on startup — the tweetHistory that those
-    // unreads referred to has been purged, so a stale badge is misleading.
-    unreadCount = 0;
-    if (typeof data.customApiUrl === 'string') {
-      customApiUrl = data.customApiUrl;
-    }
+    if (Array.isArray(data.seenIds)) seenIds = new Set(data.seenIds);
+    // Restore the cache but never yesterday's posts — the panel paints this
+    // key directly on open, so stale rows must not survive here.
+    tweetHistory = Array.isArray(data.tweetHistory) ? data.tweetHistory.filter((t) => isFresh(t)) : [];
+    unreadCount = typeof data.unreadCount === 'number' ? data.unreadCount : 0;
+    chrome.storage.local.remove(LEGACY_KEYS).catch(() => {});
     console.log(
-      `[X-Monitor BG] State loaded: ${seenIds.size} seen IDs, feed starts empty, mode=${monitorMode}, paused=${isPaused}`
+      `[X-Monitor BG] State loaded: mode=${mode}, ${tweetHistory.length} cached tweets, ${seenIds.size} seen IDs`
     );
   } catch (err) {
     console.error('[X-Monitor BG] Failed to load state:', err);
@@ -148,13 +195,11 @@ async function loadState() {
 async function saveState() {
   try {
     await chrome.storage.local.set({
+      mode,
+      manualOnUntil,
       seenIds: [...seenIds].slice(-MAX_HISTORY * 2),
       tweetHistory: tweetHistory.slice(0, MAX_HISTORY),
-      isPaused,
-      monitorMode,
-      manualOnTimestamp,
       unreadCount,
-      customApiUrl,
     });
   } catch (err) {
     console.error('[X-Monitor BG] Failed to save state:', err);
@@ -162,31 +207,124 @@ async function saveState() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// POLLING — fetch tweets from Vercel / local backend
+// PANEL MESSAGING
 // ═══════════════════════════════════════════════════════════════════════════
 
-let lastFeedHash = '';
-let _loggedFirstPoll = false;
+function statusPayload() {
+  return {
+    mode,
+    manualOnUntil,
+    polling: pollTimer !== null,
+    connected: backendUp,
+    marketOpen: isMarketHours(),
+    nextEdge: nextMarketEdge(),
+    apiUrl: activeEndpoint,
+  };
+}
 
-// Try each candidate endpoint until one answers. The winner is remembered so
-// subsequent polls go straight to it.
-async function fetchFromCandidates(headers) {
-  const candidates = endpointCandidates();
-  const ordered = [activeEndpoint, ...candidates.filter((u) => u !== activeEndpoint)];
+function pushToPanel(msg) {
+  if (!panelPort) return;
+  try {
+    panelPort.postMessage(msg);
+  } catch (e) {
+    panelPort = null;
+  }
+}
+
+function pushStatus(reason = '') {
+  pushToPanel({ type: 'STATUS', ...statusPayload(), reason });
+}
+
+function pushFeed(newCount = 0) {
+  pushToPanel({ type: 'FEED', tweets: tweetHistory, newCount });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TWEET NORMALISATION — the only shape the panel ever sees
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const HTTPS_URL = /^https:\/\/[^\s"'<>\\]+$/i;
+
+function asText(v, max) {
+  if (typeof v === 'number') v = String(v);
+  return typeof v === 'string' ? v.slice(0, max) : '';
+}
+
+function normalizeTweet(t) {
+  if (!t || typeof t !== 'object') return null;
+  const id = asText(t.id ?? t.tweetId, 64);
+  if (!SAFE_ID.test(id)) return null;
+
+  const ts = Date.parse(asText(t.created_at || t.createdAt, 64));
+  const a = t.author || t.user || {};
+  const mediaSrc = Array.isArray(t.media) ? t.media : [];
+  const media = mediaSrc
+    .map((m) => asText(m?.preview_url || m?.url, 512))
+    .filter((u) => HTTPS_URL.test(u))
+    .slice(0, 1)
+    .map((url) => ({ url }));
+
+  return {
+    id,
+    text: asText(t.text || t.full_text, 4000),
+    created_at: new Date(Number.isNaN(ts) ? Date.now() : ts).toISOString(),
+    author: {
+      name: asText(a.name, 100) || 'Unknown',
+      username: asText(a.username || a.screen_name, 50).replace(/^@/, '') || 'unknown',
+      verified: Boolean(a.verified || a.is_blue_verified),
+    },
+    media,
+  };
+}
+
+function isFresh(t, now = Date.now()) {
+  const ts = Date.parse(t?.created_at || '');
+  return !Number.isNaN(ts) && ts >= retentionCutoff(now);
+}
+
+// Drop yesterday's posts. Runs on every heartbeat and on the 08:55 alarm, so
+// the panel is wiped on time even though nothing is polling at that hour.
+function pruneHistory() {
+  const now = Date.now();
+  const kept = tweetHistory.filter((t) => isFresh(t, now));
+  if (kept.length === tweetHistory.length) return;
+  tweetHistory = kept;
+  saveState();
+  pushFeed(0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POLLING
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Try the remembered endpoint first, then the rest. `force=1` is always sent:
+// this worker is the gatekeeper for when requests happen, and the query param
+// makes sure the CDN's cached "market closed" response can never be served to
+// us at 9:00:01 or during a manual ON window.
+// `client` identifies authentic extension requests so random internet scanners can't drain invocations.
+const CLIENT_AUTH = 'x-monitor-extension-client';
+
+async function fetchFeed(headers) {
+  const ordered = [activeEndpoint, ...ENDPOINTS.filter((u) => u !== activeEndpoint)];
   let lastErr = null;
-
   for (const url of ordered) {
     try {
-      const shouldForce = monitorMode === 'on' || isMarketHours();
-      const fullUrl = shouldForce ? `${url}${url.includes('?') ? '&' : '?'}force=1` : url;
-      const res = await fetch(fullUrl, { headers, cache: 'no-store' });
+      const res = await fetch(`${url}?force=1&client=${CLIENT_AUTH}`, {
+        headers: {
+          ...headers,
+          'x-client-id': CLIENT_AUTH,
+        },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
       activeEndpoint = url;
       return res;
     } catch (err) {
       lastErr = err;
     }
   }
-  throw lastErr || new Error('No reachable local backend');
+  throw lastErr || new Error('No reachable backend');
 }
 
 function onPollSuccess() {
@@ -194,14 +332,12 @@ function onPollSuccess() {
   currentIntervalMs = POLL_INTERVAL_MS;
   if (!backendUp) {
     backendUp = true;
-    console.log(`[X-Monitor BG] Local backend reachable at ${getApiUrl()}`);
-    notifyPanelStatus();
+    console.log(`[X-Monitor BG] Backend reachable at ${activeEndpoint}`);
+    pushStatus('backend_up');
   }
 }
 
-// The local server is simply not running sometimes (laptop just booted, or the
-// user stopped it). Back off instead of hammering it 40x a minute with
-// connection errors, and recover immediately once it answers again.
+// Back off instead of hammering a dead backend; snap back on first success.
 function onPollFailure(err) {
   consecutiveFailures += 1;
   currentIntervalMs = Math.min(
@@ -211,193 +347,95 @@ function onPollFailure(err) {
   if (backendUp || consecutiveFailures === 1) {
     backendUp = false;
     console.warn(
-      `[X-Monitor BG] Backend unreachable (${err.message}). ` +
-        `Retrying every ${Math.round(currentIntervalMs / 1000)}s.`
+      `[X-Monitor BG] Backend unreachable (${err.message}). Retrying every ${Math.round(currentIntervalMs / 1000)}s.`
     );
-    notifyPanelStatus();
+    pushStatus('backend_down');
   }
 }
 
-function notifyPanelStatus() {
-  if (!panelPort) return;
-  try {
-    panelPort.postMessage({
-      type: 'BACKEND_STATUS',
-      connected: backendUp,
-      apiUrl: getApiUrl(),
-    });
-  } catch (e) {
-    panelPort = null;
-  }
-}
-
-async function pollTweets() {
-  if (isPaused || monitorMode === 'off') return;
-
-  // Reduce Vercel credit usage outside market hours (9:00 AM - 3:30 PM IST Daily)
-  // Only applies when monitorMode is 'auto'
-  if (monitorMode === 'auto') {
-    if (!isMarketHours()) {
-      currentIntervalMs = 5 * 60 * 1000; // Poll only once every 5 minutes off-market
-      return;
-    }
-  }
-  // Ensure we snap back to fast polling the moment market hours resume or when forced ON
-  currentIntervalMs = POLL_INTERVAL_MS;
-
+async function pollOnce() {
   try {
     const headers = {};
-    if (monitorMode === 'on' || isMarketHours()) {
-      headers['X-Force-Poll'] = '1';
-    }
-    if (lastFeedHash) {
-      headers['If-None-Match'] = `"${lastFeedHash}"`;
-    }
-    const res = await fetchFromCandidates(headers);
+    if (lastFeedHash) headers['If-None-Match'] = `"${lastFeedHash}"`;
+
+    const res = await fetchFeed(headers);
     onPollSuccess();
-    if (!_loggedFirstPoll) {
-      _loggedFirstPoll = true;
-      console.log(`[X-Monitor BG] First poll -> HTTP ${res.status} from ${getApiUrl()}`);
-    }
-    if (res.status === 304) return; // Feed has not changed — 0 bytes payload!
+    if (res.status === 304) return; // unchanged — zero-byte response
     if (!res.ok) throw new Error(`API returned ${res.status}`);
+
     const data = await res.json();
+    const serverFeedHash = asText(data?.feedHash, 32);
+    const now = Date.now();
+    const incoming = (Array.isArray(data?.tweets) ? data.tweets : [])
+      .map(normalizeTweet)
+      .filter((t) => t && isFresh(t, now));
 
-    const tweets = data.tweets || [];
-    const serverFeedHash = data.feedHash || '';
-
-    // A healthy backend returning an empty feed means the store genuinely is
-    // empty (e.g. a fresh local install). Previously we returned early here,
-    // which left months-old cached tweets on screen next to a green "connected"
-    // dot — looking live when nothing was arriving. Clear them instead.
-    if (tweets.length === 0) {
+    // An empty feed from a healthy backend means the store really is empty.
+    if (incoming.length === 0) {
+      lastFeedHash = serverFeedHash;
       if (tweetHistory.length > 0) {
-        console.log('[X-Monitor BG] Backend feed is empty — clearing stale cached tweets');
         tweetHistory = [];
-        seenIds.clear();
-        lastFeedHash = '';
         await saveState();
-        if (panelPort) {
-          try {
-            panelPort.postMessage({ type: 'HISTORY_CLEARED' });
-          } catch (e) {
-            panelPort = null;
-          }
-        }
+        pushFeed(0);
       }
       return;
     }
 
-    // Quick check: if feed hash hasn't changed, nothing new to do
     if (serverFeedHash && serverFeedHash === lastFeedHash) return;
     lastFeedHash = serverFeedHash;
 
-    // Normalize incoming tweets to match panel expectations
-    const normalizedTweets = tweets.map((t) => ({
-      id: String(t.id || t.tweetId || ''),
-      text: t.text || t.full_text || '',
-      created_at: t.created_at || t.createdAt || new Date().toISOString(),
-      createdAt: t.createdAt || t.created_at || new Date().toISOString(),
-      author: {
-        id: t.author?.id || t.user?.id || '',
-        name: t.author?.name || t.user?.name || 'Unknown',
-        username: t.author?.username || t.user?.username || t.user?.screen_name || 'unknown',
-        profile_image_url: t.author?.profile_image_url || t.user?.profile_image_url || null,
-        avatar: t.author?.profile_image_url || t.user?.profile_image_url || null,
-        verified: Boolean(t.author?.verified || t.user?.verified || t.user?.is_blue_verified),
-      },
-      media: t.media || t.entities?.media || [],
-    }));
-
-    // Find genuinely new tweets
     const isFirstLoad = seenIds.size === 0;
-    const newTweets = normalizedTweets.filter((t) => t.id && !seenIds.has(t.id));
-
-    // Mark all fetched tweets as seen
-    for (const t of normalizedTweets) {
-      if (t.id) seenIds.add(t.id);
-    }
-
-    // Trim seenIds to prevent unbounded growth
+    const newTweets = incoming.filter((t) => !seenIds.has(t.id));
+    for (const t of incoming) seenIds.add(t.id);
     if (seenIds.size > MAX_HISTORY * 3) {
-      const arr = [...seenIds];
-      seenIds = new Set(arr.slice(arr.length - MAX_HISTORY * 2));
+      seenIds = new Set([...seenIds].slice(-MAX_HISTORY * 2));
     }
 
-    // Adopt newest tweets up to MAX_HISTORY (strictly within past 1 hour)
-    const ONE_HOUR_MS = 60 * 60 * 1000;
-    const now = Date.now();
-    tweetHistory = normalizedTweets
-      .filter((t) => {
-        const ts = new Date(t.created_at || t.createdAt).getTime();
-        return Number.isNaN(ts) || now - ts <= ONE_HOUR_MS;
-      })
-      .slice(0, MAX_HISTORY);
-    console.log(
-      `[X-Monitor BG] Feed updated: ${tweetHistory.length} tweets (<= 1h) ` +
-        `(${newTweets.length} new) — newest: ` +
-        `@${tweetHistory[0]?.author?.username} "${(tweetHistory[0]?.text || '').slice(0, 45)}"`
-    );
-
-    // Save state
+    tweetHistory = incoming.slice(0, MAX_HISTORY);
     await saveState();
+    pushFeed(isFirstLoad ? 0 : newTweets.length);
 
-    // Push to panel if connected
-    if (panelPort) {
-      try {
-        panelPort.postMessage({
-          type: 'NEW_TWEETS',
-          tweets: tweetHistory,
-          newCount: isFirstLoad ? 0 : newTweets.length,
-          feedHash: serverFeedHash,
-        });
-      } catch (e) {
-        console.warn('[X-Monitor BG] Panel port send failed:', e);
-        panelPort = null;
-      }
-    }
-
-    // Desktop notification + badge (skip on first load to avoid notification storm)
     if (!isFirstLoad && newTweets.length > 0) {
-      unreadCount += newTweets.length;
-      updateBadge();
-
-      const firstNew = newTweets[0];
-      const authorName = getAccountName(
-        firstNew.author?.username || firstNew.author?.name
+      console.log(
+        `[X-Monitor BG] +${newTweets.length} new — @${newTweets[0].author.username}: "${newTweets[0].text.slice(0, 60)}"`
       );
-      const bodyText =
-        newTweets.length === 1
-          ? (firstNew.text || '').slice(0, 140)
-          : `${newTweets.length} new posts from ${[...new Set(newTweets.map((t) => getAccountName(t.author?.username || t.author?.name)))].join(', ')}`;
-
-      try {
-        chrome.notifications.create(`xmon-${Date.now()}`, {
-          type: 'basic',
-          iconUrl: 'icons/icon128.png',
-          title: newTweets.length === 1 ? `${authorName} posted` : `${newTweets.length} new posts`,
-          message: bodyText,
-          priority: 2,
-        });
-      } catch (e) {
-        console.warn('[X-Monitor BG] Notification failed:', e);
+      // Badge counts posts the user hasn't seen; a connected panel is showing them.
+      if (!panelPort) {
+        unreadCount += newTweets.length;
+        updateBadge();
       }
+      notifyNewTweets(newTweets);
     }
   } catch (err) {
     onPollFailure(err);
   }
 }
 
+function notifyNewTweets(newTweets) {
+  const first = newTweets[0];
+  const authors = [...new Set(newTweets.map((t) => getAccountName(t.author.username)))];
+  try {
+    chrome.notifications.create(`xmon-${Date.now()}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: newTweets.length === 1 ? `${authors[0]} posted` : `${newTweets.length} new posts`,
+      message:
+        newTweets.length === 1
+          ? first.text.slice(0, 140)
+          : `${newTweets.length} new posts from ${authors.join(', ')}`,
+      priority: 2,
+    });
+  } catch (e) {
+    console.warn('[X-Monitor BG] Notification failed:', e);
+  }
+}
+
 function updateBadge() {
   try {
-    if (unreadCount > 0) {
-      chrome.action.setBadgeText({ text: String(unreadCount) });
-      chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-    } else {
-      chrome.action.setBadgeText({ text: '' });
-    }
+    chrome.action.setBadgeText({ text: unreadCount > 0 ? String(unreadCount) : '' });
+    if (unreadCount > 0) chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
   } catch (e) {
-    // Action API might be unavailable in some contexts
+    // action API unavailable in some contexts
   }
 }
 
@@ -407,131 +445,269 @@ function clearBadge() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// POLLING LIFECYCLE
+// PUSHER REAL-TIME WEBSOCKET (Sub-500ms Push Updates)
 // ═══════════════════════════════════════════════════════════════════════════
 
+function connectPusher() {
+  if (!PUSHER_KEY) return;
+  if (pusherWs && (pusherWs.readyState === WebSocket.OPEN || pusherWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  if (!shouldPoll()) return;
+
+  try {
+    const wsUrl = `wss://ws-${PUSHER_CLUSTER}.pusher.com/app/${PUSHER_KEY}?protocol=7&client=js&version=8.4.0`;
+    pusherWs = new WebSocket(wsUrl);
+
+    pusherWs.onopen = () => {
+      console.log('[X-Monitor Pusher] WebSocket opened');
+    };
+
+    pusherWs.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.event === 'pusher:connection_established') {
+          pusherConnected = true;
+          console.log(`[X-Monitor Pusher] Connected, subscribing to ${PUSHER_CHANNEL}...`);
+          pusherWs.send(
+            JSON.stringify({
+              event: 'pusher:subscribe',
+              data: { channel: PUSHER_CHANNEL },
+            })
+          );
+          // With Pusher active, stop background polling loop entirely.
+          // We do ONE initial poll to make sure history is up to date, then let Pusher handle all updates.
+          stopPolling();
+          pollOnce();
+        } else if (msg.event === 'pusher:ping') {
+          pusherWs.send(JSON.stringify({ event: 'pusher:pong', data: {} }));
+        } else if (msg.event === 'new-tweets') {
+          const payload = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
+          const tweets = Array.isArray(payload?.tweets)
+            ? payload.tweets
+            : payload?.tweet
+            ? [payload.tweet]
+            : [];
+          if (tweets.length > 0) {
+            handleRealtimeTweets(tweets);
+          }
+        }
+      } catch (err) {
+        console.warn('[X-Monitor Pusher] Parse error:', err);
+      }
+    };
+
+    pusherWs.onclose = () => {
+      pusherConnected = false;
+      console.log('[X-Monitor Pusher] Disconnected — falling back to polling');
+      if (shouldPoll()) {
+        startPolling();
+        schedulePusherReconnect();
+      }
+    };
+
+    pusherWs.onerror = (err) => {
+      console.warn('[X-Monitor Pusher] WebSocket error:', err);
+      try { pusherWs.close(); } catch {}
+    };
+  } catch (err) {
+    console.warn('[X-Monitor Pusher] Connection error:', err);
+    schedulePusherReconnect();
+  }
+}
+
+function disconnectPusher() {
+  if (pusherReconnectTimer) {
+    clearTimeout(pusherReconnectTimer);
+    pusherReconnectTimer = null;
+  }
+  if (pusherWs) {
+    try { pusherWs.close(); } catch {}
+    pusherWs = null;
+  }
+  pusherConnected = false;
+}
+
+function schedulePusherReconnect() {
+  if (pusherReconnectTimer) clearTimeout(pusherReconnectTimer);
+  pusherReconnectTimer = setTimeout(() => {
+    pusherReconnectTimer = null;
+    if (shouldPoll()) connectPusher();
+  }, 5000);
+}
+
+async function handleRealtimeTweets(rawTweets) {
+  const now = Date.now();
+  const incoming = rawTweets.map(normalizeTweet).filter((t) => t && isFresh(t, now));
+  if (incoming.length === 0) return;
+
+  const newTweets = incoming.filter((t) => !seenIds.has(t.id));
+  if (newTweets.length === 0) return;
+
+  for (const t of newTweets) seenIds.add(t.id);
+  if (seenIds.size > MAX_HISTORY * 3) {
+    seenIds = new Set([...seenIds].slice(-MAX_HISTORY * 2));
+  }
+
+  // Prepend newest incoming tweets to current history
+  const merged = [...newTweets, ...tweetHistory];
+  const unique = [];
+  const tracked = new Set();
+  for (const t of merged) {
+    if (!tracked.has(t.id)) {
+      tracked.add(t.id);
+      unique.push(t);
+    }
+  }
+  tweetHistory = unique.slice(0, MAX_HISTORY);
+  await saveState();
+
+  pushFeed(newTweets.length);
+  console.log(
+    `[X-Monitor Pusher] ⚡ Instant delivery: +${newTweets.length} — @${newTweets[0].author.username}: "${newTweets[0].text.slice(0, 60)}"`
+  );
+
+  if (!panelPort) {
+    unreadCount += newTweets.length;
+    updateBadge();
+  }
+  notifyNewTweets(newTweets);
+}
+
+// ── Poll loop lifecycle ───────────────────────────────────────────────────
+
+// Each start bumps the generation; a tick that was mid-fetch when the loop was
+// stopped (and possibly restarted) sees a stale generation and simply ends, so
+// there is never more than one chain running.
+let pollGeneration = 0;
+
 function startPolling() {
-  if (pollTimerId) return;
-  console.log(`[X-Monitor BG] Starting poll loop (${POLL_INTERVAL_MS}ms base interval)`);
+  if (pollTimer !== null) return;
+  console.log(`[X-Monitor BG] Polling started (${mode}, ${POLL_INTERVAL_MS}ms)`);
+  currentIntervalMs = POLL_INTERVAL_MS;
+  const gen = ++pollGeneration;
 
   const tick = async () => {
-    await pollTweets();
-    // Only reschedule if we were not stopped while the poll was in flight.
-    if (pollTimerId !== null) {
-      pollTimerId = setTimeout(tick, currentIntervalMs);
+    if (gen !== pollGeneration) return;
+    // Re-check on every iteration so the cutoff is exact, not "next heartbeat".
+    if (!shouldPoll()) {
+      stopPolling();
+      reconcile('poll_tick');
+      return;
+    }
+    await pollOnce();
+    if (gen === pollGeneration && pollTimer !== null) {
+      pollTimer = setTimeout(tick, currentIntervalMs);
     }
   };
 
-  pollTimerId = setTimeout(tick, 0);
+  pollTimer = setTimeout(tick, 0);
+  pushStatus('polling_started');
 }
 
 function stopPolling() {
-  if (pollTimerId !== null) {
-    clearTimeout(pollTimerId);
-    pollTimerId = null;
-    console.log('[X-Monitor BG] Polling stopped');
-  }
+  if (pollTimer === null) return;
+  clearTimeout(pollTimer);
+  pollTimer = null;
+  backendUp = false; // unknown until we poll again; don't show a stale green dot
+  console.log('[X-Monitor BG] Polling stopped — backend idle');
+  pushStatus('polling_stopped');
 }
 
-function restartPolling() {
-  stopPolling();
-  startPolling();
-}
+// ═══════════════════════════════════════════════════════════════════════════
+// SCHEDULER
+// ═══════════════════════════════════════════════════════════════════════════
 
-function applyMonitorMode(mode, reason = '', explicitTimestamp = 0) {
-  if (!['auto', 'on', 'off'].includes(mode)) return monitorMode;
-  monitorMode = mode;
-  isPaused = (mode === 'off');
+function setMode(next, reason = '') {
+  if (next !== 'auto' && next !== 'on') return mode;
+  const prevMode = mode;
+  mode = next;
   if (mode === 'on') {
-    manualOnTimestamp = explicitTimestamp || manualOnTimestamp || Date.now();
+    // Pressing ON again restarts the 5-minute window.
+    manualOnUntil = Date.now() + MANUAL_ON_MS;
+    chrome.alarms.create(ALARM_ON_EXPIRY, { when: manualOnUntil + 250 });
+
+    // Wake up local stream listener and Vercel backend for 5 minutes
+    const wakeBody = JSON.stringify({ duration: MANUAL_ON_MS, mode: 'on' });
+    fetch('http://127.0.0.1:3000/api/manual-on', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: wakeBody,
+    }).catch(() => {});
+    fetch('https://x-monitoring-dashboard.vercel.app/api/manual-on', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: wakeBody,
+    }).catch(() => {});
   } else {
-    manualOnTimestamp = 0;
+    manualOnUntil = 0;
+    chrome.alarms.clear(ALARM_ON_EXPIRY);
+
+    if (prevMode === 'on') {
+      // Notify stream listener to sleep immediately if outside market hours
+      fetch('http://127.0.0.1:3000/api/manual-off', { method: 'POST' }).catch(() => {});
+      fetch('https://x-monitoring-dashboard.vercel.app/api/manual-on', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'off' }),
+      }).catch(() => {});
+    }
   }
-  console.log(`[X-Monitor BG] Mode set to: ${monitorMode}${reason ? ` (${reason})` : ''}`);
+  console.log(`[X-Monitor BG] Mode → ${mode}${reason ? ` (${reason})` : ''}`);
   saveState();
+  reconcile(`mode_${reason || 'set'}`);
+  pushStatus(reason);
+  return mode;
+}
 
-  if (monitorMode === 'off') {
-    stopPolling();
-  } else if (monitorMode === 'on') {
-    currentIntervalMs = POLL_INTERVAL_MS;
-    startPolling();
-    pollTweets();
+// Bring the poll loop in line with the clock and the mode. Idempotent; called
+// from every alarm, on panel connect, on mode change and on worker start.
+function reconcile(reason = '') {
+  if (mode === 'on' && Date.now() >= manualOnUntil) {
+    setMode('auto', 'manual_on_expired');
+    return;
+  }
+  if (shouldPoll()) {
+    connectPusher();
+    if (!pusherConnected) startPolling();
   } else {
-    // 'auto'
-    currentIntervalMs = POLL_INTERVAL_MS;
-    startPolling();
-    pollTweets();
+    stopPolling();
+    disconnectPusher();
   }
-
-  if (panelPort) {
-    try {
-      panelPort.postMessage({ type: 'MODE_CHANGED', mode: monitorMode, manualOnTimestamp, reason });
-    } catch (e) {
-      panelPort = null;
-    }
-  }
-  return monitorMode;
+  pruneHistory();
+  scheduleEdgeWake();
 }
 
-// ── Auto Schedule Checker (9:00 AM auto-start & 5-min post-market auto-off) ──
-function checkAutoSchedule() {
-  const { minutes, dateStr } = getIstTime();
-
-  // Rule 1: At 9:00 AM IST (Daily), automatically start polling even if toggle was OFF
-  if (minutes >= 540 && minutes <= 930) {
-    if (lastAutoStartedDate !== dateStr) {
-      lastAutoStartedDate = dateStr;
-      if (monitorMode === 'off') {
-        console.log('[X-Monitor BG] 9:00 AM IST market open — auto-starting monitoring.');
-        applyMonitorMode('on', 'market_open_9am');
-        return;
-      }
-    }
+// Alarms are the durable wake-up (they survive the worker being killed) but
+// packed extensions clamp them to >= 30s. When the edge is closer than that,
+// add a plain timer as well so 9:00:00 really starts at 9:00:00.
+let edgeTimer = null;
+function scheduleEdgeWake() {
+  const edge = nextEdge();
+  chrome.alarms.create(ALARM_MARKET_EDGE, { when: edge + 500 });
+  if (edgeTimer !== null) clearTimeout(edgeTimer);
+  edgeTimer = null;
+  const delay = edge - Date.now();
+  if (delay <= 35000) {
+    edgeTimer = setTimeout(() => {
+      edgeTimer = null;
+      reconcile('market_edge_timer');
+    }, delay + 200);
   }
-
-  // Rule 2: If toggle was left ON, turn it OFF in 5 minutes after market hours (3:35 PM IST)
-  // or 5 minutes after turning ON outside market hours
-  if (monitorMode === 'on') {
-    const inCoreMarket = minutes >= 540 && minutes <= 930;
-    if (!inCoreMarket) {
-      // Allow 5-min post-market grace window (3:30 PM - 3:35 PM IST daily)
-      const inPostMarketGrace = minutes >= 930 && minutes < 935;
-      if (!inPostMarketGrace) {
-        const elapsed = Date.now() - manualOnTimestamp;
-        // If it ran through market close, minutes >= 935 triggers auto-off.
-        // If turned on manually outside market hours, elapsed >= 5 mins triggers auto-off.
-        const isPostMarketCutoff = minutes >= 935 && minutes < 940;
-        if (isPostMarketCutoff || elapsed >= 5 * 60 * 1000) {
-          console.log('[X-Monitor BG] 5-minute post-market limit reached — auto-turning OFF toggle.');
-          applyMonitorMode('off', 'auto_off_5min');
-        }
-      }
-    }
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ALARMS — keep service worker alive and polling
-// ═══════════════════════════════════════════════════════════════════════════
-
-function setupHeartbeat() {
-  chrome.alarms.create(ALARM_NAME, {
-    periodInMinutes: 0.5,
-  });
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === ALARM_NAME) {
-    checkAutoSchedule();
-    if (!isPaused && monitorMode !== 'off' && !pollTimerId) {
-      console.log('[X-Monitor BG] Heartbeat alarm revived polling');
-      startPolling();
-    }
+  if (
+    alarm.name === ALARM_HEARTBEAT ||
+    alarm.name === ALARM_ON_EXPIRY ||
+    alarm.name === ALARM_MARKET_EDGE
+  ) {
+    reconcile(alarm.name);
   }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FLOATING PANEL WINDOW MANAGEMENT
+// FLOATING PANEL WINDOW
 // ═══════════════════════════════════════════════════════════════════════════
 
 const PANEL_WIDTH = 420;
@@ -543,11 +719,8 @@ async function openOrFocusPanel() {
 
   if (panelWindowId !== null) {
     try {
-      const win = await chrome.windows.get(panelWindowId);
-      if (win) {
-        await chrome.windows.update(panelWindowId, { focused: true });
-        return;
-      }
+      await chrome.windows.update(panelWindowId, { focused: true });
+      return;
     } catch (e) {
       panelWindowId = null;
     }
@@ -556,13 +729,13 @@ async function openOrFocusPanel() {
   let left = 100;
   let top = 100;
   try {
-    const currentWin = await chrome.windows.getCurrent();
-    if (currentWin && currentWin.left !== undefined) {
-      left = Math.max(0, currentWin.left + currentWin.width - PANEL_WIDTH - 20);
-      top = Math.max(0, currentWin.top + 60);
+    const cur = await chrome.windows.getCurrent();
+    if (cur && cur.left !== undefined) {
+      left = Math.max(0, cur.left + cur.width - PANEL_WIDTH - 20);
+      top = Math.max(0, cur.top + 60);
     }
   } catch (e) {
-    // fallback to defaults
+    // keep defaults
   }
 
   try {
@@ -581,135 +754,12 @@ async function openOrFocusPanel() {
   }
 }
 
-chrome.action.onClicked.addListener(async () => {
-  await openOrFocusPanel();
-});
+chrome.action.onClicked.addListener(openOrFocusPanel);
 
 chrome.windows.onRemoved.addListener((windowId) => {
   if (windowId === panelWindowId) {
     panelWindowId = null;
     panelPort = null;
-    console.log('[X-Monitor BG] Panel window closed');
-  }
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// PORT-BASED COMMUNICATION (with panel window)
-// ═══════════════════════════════════════════════════════════════════════════
-
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === 'panel') {
-    console.log('[X-Monitor BG] Panel port connected');
-    panelPort = port;
-    checkAutoSchedule();
-
-    // Send current state immediately
-    port.postMessage({
-      type: 'INIT',
-      tweets: tweetHistory,
-      isPaused,
-      monitorMode,
-      manualOnTimestamp,
-      connected: backendUp,
-      apiUrl: getApiUrl(),
-    });
-
-    // Ensure polling is running
-    if (!isPaused && monitorMode !== 'off') startPolling();
-
-    port.onMessage.addListener((msg) => {
-      if (msg.type === 'PING') {
-        if (!isPaused && monitorMode !== 'off' && !pollTimerId) startPolling();
-      } else if (msg.type === 'SET_MODE') {
-        applyMonitorMode(msg.mode, 'panel_port', msg.manualOnTimestamp);
-      }
-    });
-
-    port.onDisconnect.addListener(() => {
-      // Reading lastError swallows the benign "page moved into back/forward
-      // cache" notice that Chrome otherwise logs as an unchecked error.
-      void chrome.runtime.lastError;
-      console.log('[X-Monitor BG] Panel port disconnected');
-      panelPort = null;
-    });
-  }
-
-  if (port.name === 'content-keepalive') {
-    // Content scripts keep the service worker alive via ping. We don't need
-    // to track individual ports — just use pings to revive polling if needed.
-    port.onMessage.addListener((msg) => {
-      if (msg.type === 'PING') {
-        if (!isPaused && !pollTimerId) startPolling();
-      }
-    });
-
-    port.onDisconnect.addListener(() => {
-      void chrome.runtime.lastError; // bfcache disconnects are expected
-    });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ONE-OFF MESSAGE HANDLERS
-// ═══════════════════════════════════════════════════════════════════════════
-
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  switch (msg.type) {
-    case 'GET_STATUS':
-      sendResponse({
-        isPaused,
-        monitorMode,
-        tweetCount: tweetHistory.length,
-        seenCount: seenIds.size,
-        panelOpen: panelWindowId !== null,
-        connected: backendUp,
-        apiUrl: getApiUrl(),
-        failures: consecutiveFailures,
-      });
-      return true;
-
-    case 'SET_MODE': {
-      const mode = applyMonitorMode(msg.mode);
-      sendResponse({ success: true, mode });
-      return true;
-    }
-
-    case 'CLEAR_HISTORY':
-      seenIds.clear();
-      tweetHistory = [];
-      clearBadge();
-      saveState();
-      if (panelPort) {
-        try {
-          panelPort.postMessage({ type: 'HISTORY_CLEARED' });
-        } catch (e) {}
-      }
-      sendResponse({ cleared: true });
-      return true;
-
-    case 'CLEAR_BADGE':
-      clearBadge();
-      saveState();
-      sendResponse({ cleared: true });
-      return true;
-
-    case 'TEST_NOTIFICATION':
-      chrome.notifications.create(`xmon-test-${Date.now()}`, {
-        type: 'basic',
-        iconUrl: 'icons/icon128.png',
-        title: 'X Monitor — Test',
-        message: 'Notifications are working perfectly! 🎉',
-        priority: 2,
-      });
-      sendResponse({ sent: true });
-      return true;
-
-    case 'GET_TWEETS':
-      sendResponse({ tweets: tweetHistory });
-      return true;
-
-    default:
-      return false;
   }
 });
 
@@ -719,16 +769,116 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// STARTUP
+// PORTS — panel (data + control) and content-script keep-alive
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Single init — the IIFE runs unconditionally at script load, which Chrome
-// guarantees on startup and install. No need for separate event listeners.
-(async function init() {
-  console.log('[X-Monitor BG] Service worker initialized');
-  await loadState();
-  setupHeartbeat();
-  updateBadge();
-  if (!isPaused) startPolling();
-})();
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.sender?.id !== chrome.runtime.id) return;
 
+  if (port.name === 'panel') {
+    panelPort = port;
+    clearBadge();
+    reconcile('panel_connect');
+    port.postMessage({ type: 'INIT', tweets: tweetHistory, ...statusPayload() });
+
+    port.onMessage.addListener((msg) => {
+      if (msg?.type === 'SET_MODE') setMode(msg.mode, 'panel');
+      // PING needs no handling — receiving it is what keeps the worker alive.
+    });
+
+    port.onDisconnect.addListener(() => {
+      void chrome.runtime.lastError; // swallow the benign bfcache notice
+      if (panelPort === port) panelPort = null;
+    });
+    return;
+  }
+
+  if (port.name === 'content-keepalive') {
+    port.onDisconnect.addListener(() => {
+      void chrome.runtime.lastError;
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ONE-OFF MESSAGES (console debugging + panel fallback)
+// ═══════════════════════════════════════════════════════════════════════════
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id || !msg || typeof msg.type !== 'string') return false;
+
+  switch (msg.type) {
+    case 'GET_STATUS':
+      sendResponse({
+        ...statusPayload(),
+        tweetCount: tweetHistory.length,
+        seenCount: seenIds.size,
+        panelOpen: panelWindowId !== null,
+        failures: consecutiveFailures,
+        pusherConnected,
+        pusherConfigured: Boolean(PUSHER_KEY),
+      });
+      return false;
+
+    case 'SET_PUSHER_CONFIG':
+      if (typeof msg.key === 'string') PUSHER_KEY = msg.key.trim();
+      if (typeof msg.cluster === 'string') PUSHER_CLUSTER = msg.cluster.trim();
+      chrome.storage.local.set({ pusherKey: PUSHER_KEY, pusherCluster: PUSHER_CLUSTER });
+      disconnectPusher();
+      if (shouldPoll()) connectPusher();
+      sendResponse({ success: true, key: PUSHER_KEY, cluster: PUSHER_CLUSTER });
+      return false;
+
+    case 'SET_MODE':
+      sendResponse({ success: true, mode: setMode(msg.mode, 'message') });
+      return false;
+
+    case 'CLEAR_HISTORY':
+      seenIds.clear();
+      tweetHistory = [];
+      lastFeedHash = '';
+      clearBadge();
+      saveState();
+      pushFeed(0);
+      sendResponse({ cleared: true });
+      return false;
+
+    case 'CLEAR_BADGE':
+      clearBadge();
+      saveState();
+      sendResponse({ cleared: true });
+      return false;
+
+    case 'TEST_NOTIFICATION':
+      chrome.notifications.create(`xmon-test-${Date.now()}`, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'X Monitor — Test',
+        message: 'Notifications are working.',
+        priority: 2,
+      });
+      sendResponse({ sent: true });
+      return false;
+
+    case 'GET_TWEETS':
+      sendResponse({ tweets: tweetHistory });
+      return false;
+
+    default:
+      return false;
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STARTUP — runs on every worker start (install, browser launch, wake-up)
+// ═══════════════════════════════════════════════════════════════════════════
+
+(async function init() {
+  console.log('[X-Monitor BG] Service worker started');
+  await loadState();
+  updateBadge();
+  // Creating an alarm that already exists just replaces it — safe to repeat.
+  chrome.alarms.create(ALARM_HEARTBEAT, { periodInMinutes: 0.5 });
+  if (mode === 'on') chrome.alarms.create(ALARM_ON_EXPIRY, { when: manualOnUntil + 250 });
+  reconcile('init');
+})();

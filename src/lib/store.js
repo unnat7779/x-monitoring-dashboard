@@ -1,4 +1,2 @@
-// Re-export shim so existing `@/lib/store` imports keep working.
-// The implementation lives in store.mjs so that plain-Node scripts
-// (scripts/stream-listener.mjs) can import it directly as ESM.
+// Re-export shim so `@/lib/store` resolves; the implementation is store.mjs.
 export * from './store.mjs';

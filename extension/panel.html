@@ -18,11 +18,10 @@
       </div>
 
       <div class="header-actions">
-        <!-- Power / Mode Toggle (Auto / ON / OFF) -->
+        <!-- Mode Toggle (Auto / ON) -->
         <div class="mode-toggle" id="mode-toggle">
-          <button id="btn-mode-auto" class="mode-btn active" title="Auto: Active during market hours (9:00 AM – 3:30 PM IST Daily)">Auto</button>
-          <button id="btn-mode-on" class="mode-btn" title="Manual ON: Force live monitoring (bypasses market hours)">ON</button>
-          <button id="btn-mode-off" class="mode-btn" title="Manual OFF: Completely sleep/stop polling">OFF</button>
+          <button id="btn-mode-auto" class="mode-btn active" title="Auto: polls 9:00 AM – 3:30 PM IST daily, idle otherwise">Auto</button>
+          <button id="btn-mode-on" class="mode-btn" title="ON: poll now for 5 minutes, then return to Auto">ON</button>
         </div>
 
         <!-- Count Toggle (3 vs 5) -->
@@ -32,9 +31,6 @@
         </div>
       </div>
     </header>
-
-
-
 
     <!-- Real-time Update Alert Banner -->
     <div id="update-toast" class="update-toast hidden">

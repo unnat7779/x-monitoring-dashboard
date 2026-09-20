@@ -156,12 +156,6 @@ body {
   letter-spacing: -0.2px;
 }
 
-.mode-btn.active#btn-mode-off {
-  background: #ef4444;
-  color: #ffffff;
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
-}
-
 /* ── Toast Alert ────────────────────────────────────────────────────────── */
 
 .update-toast {
