@@ -17,6 +17,7 @@ const MONITORED_ACCOUNTS = [
   { handle: 'bsindia', name: 'Business Standard', category: 'Financial Media', tag: 'PRINT & DIGITAL', color: '#e11d48', verified: true },
   { handle: 'business', name: 'Bloomberg', category: 'Financial Media', tag: 'GLOBAL MARKETS', color: '#8b5cf6', verified: true },
   { handle: 'ANI', name: 'ANI News', category: 'News Wire', tag: 'NEWS AGENCY', color: '#ef4444', verified: true },
+  { handle: 'PTI_News', name: 'PTI News', category: 'News Wire', tag: 'NEWS AGENCY', color: '#06b6d4', verified: true },
   { handle: 'LiveLawIndia', name: 'Live Law', category: 'News Wire', tag: 'LEGAL & COURTS', color: '#f43f5e', verified: true },
   { handle: 'YatinMota', name: 'Yatin Mota', category: 'Journalists & Analysts', tag: 'MARKETS & DEALS', color: '#34d399', verified: true },
   { handle: 'darshanvmehta1', name: 'Darshan Mehta', category: 'Journalists & Analysts', tag: 'MARKETS & DEALS', color: '#38bdf8', verified: true },
@@ -77,7 +78,7 @@ function resolveAccountForTweet(tweet) {
     return getAccountMeta('darshanvmehta1');
   }
   if (textLower.includes('soumeet') || textLower.includes('soumeetsarkar')) {
-    return getAccountMeta('soumeet_sarkar');
+    return getAccountMeta('SoumeetSarkar');
   }
   if (textLower.includes('livelaw') || textLower.includes('supreme court') || textLower.includes('high court')) {
     return getAccountMeta('LiveLawIndia');
@@ -90,6 +91,8 @@ function resolveAccountForTweet(tweet) {
 let state = {
   maxCount: 3,
   rawTweets: [],
+  monitorMode: 'auto', // 'auto' | 'on' | 'off'
+  manualOnTimestamp: 0,
 };
 
 let expandedPostId = null;
@@ -114,6 +117,7 @@ const STORAGE_SYNC_DELAY_MS = 1200; // let the port win before storage applies
 let lastPortDataTime = 0;
 let storageSyncTimerId = null;
 let portIsHealthy = false;
+let backendConnected = false;
 
 function connectPort() {
   try {
@@ -194,7 +198,13 @@ function applyTweets(tweets, { force = false, announce = false } = {}) {
 
 async function loadFromStorage(options) {
   try {
-    const data = await chrome.storage.local.get('tweetHistory');
+    const data = await chrome.storage.local.get(['tweetHistory', 'monitorMode', 'manualOnTimestamp']);
+    if (typeof data.manualOnTimestamp === 'number') {
+      state.manualOnTimestamp = data.manualOnTimestamp;
+    }
+    if (data.monitorMode) {
+      setModeUI(data.monitorMode, state.manualOnTimestamp);
+    }
     if (Array.isArray(data.tweetHistory) && data.tweetHistory.length > 0) {
       applyTweets(data.tweetHistory, options);
     }
@@ -242,12 +252,26 @@ function handlePortMessage(msg) {
   switch (msg.type) {
     case 'INIT':
       state.rawTweets = msg.tweets || [];
+      if (typeof msg.connected === 'boolean') backendConnected = msg.connected;
+      if (typeof msg.manualOnTimestamp === 'number') state.manualOnTimestamp = msg.manualOnTimestamp;
+      if (msg.monitorMode) setModeUI(msg.monitorMode, state.manualOnTimestamp);
       renderFeed(true);
       updatePostCount();
       break;
 
+    case 'MODE_CHANGED':
+      if (typeof msg.manualOnTimestamp === 'number') state.manualOnTimestamp = msg.manualOnTimestamp;
+      if (msg.mode) setModeUI(msg.mode, state.manualOnTimestamp);
+      if (msg.reason === 'auto_off_5min') {
+        showToast('Turned OFF after 5-min post-market limit');
+      } else if (msg.reason === 'market_open_9am') {
+        showToast('Auto-started for 9:00 AM market open');
+      }
+      break;
+
     case 'NEW_TWEETS':
       state.rawTweets = msg.tweets || [];
+      backendConnected = true;
       renderFeed();
       updatePostCount();
       if (msg.newCount > 0) {
@@ -269,6 +293,11 @@ function handlePortMessage(msg) {
       renderFeed(true);
       updatePostCount();
       break;
+
+    case 'BACKEND_STATUS':
+      backendConnected = Boolean(msg.connected);
+      updatePostCount();
+      break;
   }
 }
 
@@ -280,6 +309,111 @@ const toastMessage = document.getElementById('toast-message');
 const toastClose = document.getElementById('toast-close');
 const btnCount3 = document.getElementById('btn-count-3');
 const btnCount5 = document.getElementById('btn-count-5');
+const btnModeAuto = document.getElementById('btn-mode-auto');
+const btnModeOn = document.getElementById('btn-mode-on');
+const btnModeOff = document.getElementById('btn-mode-off');
+
+let countdownInterval = null;
+
+function formatCountdown(secs) {
+  if (secs == null || secs <= 0) return '0:00';
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function startCountdown(explicitTimestamp) {
+  if (explicitTimestamp) {
+    state.manualOnTimestamp = explicitTimestamp;
+  }
+  if (!state.manualOnTimestamp) {
+    state.manualOnTimestamp = Date.now();
+    chrome.storage.local.set({ manualOnTimestamp: state.manualOnTimestamp });
+  }
+
+  if (isMarketHours()) {
+    stopCountdown();
+    if (btnModeOn) btnModeOn.textContent = 'ON';
+    return;
+  }
+
+  const tick = () => {
+    if (state.monitorMode !== 'on') {
+      stopCountdown();
+      return;
+    }
+    const elapsedMs = Date.now() - state.manualOnTimestamp;
+    const remaining = Math.max(0, Math.ceil((5 * 60 * 1000 - elapsedMs) / 1000));
+
+    if (remaining <= 0) {
+      stopCountdown();
+      changeMode('off');
+    } else {
+      if (btnModeOn) btnModeOn.textContent = formatCountdown(remaining);
+      updateEmptyStateCountdown(remaining);
+    }
+  };
+
+  tick();
+  if (!countdownInterval) {
+    countdownInterval = setInterval(tick, 1000);
+  }
+}
+
+function updateEmptyStateCountdown(remaining) {
+  const subEl = document.querySelector('.empty-state-sub');
+  if (subEl && state.monitorMode === 'on' && state.rawTweets.length === 0) {
+    subEl.textContent = `Manual ON mode active · Auto-off in ${formatCountdown(remaining)}`;
+  }
+}
+
+function stopCountdown() {
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
+  }
+  if (btnModeOn) btnModeOn.textContent = 'ON';
+}
+
+function setModeUI(mode, timestamp) {
+  if (!['auto', 'on', 'off'].includes(mode)) return;
+  const previousMode = state.monitorMode;
+  state.monitorMode = mode;
+  if (btnModeAuto) btnModeAuto.classList.toggle('active', mode === 'auto');
+  if (btnModeOn) btnModeOn.classList.toggle('active', mode === 'on');
+  if (btnModeOff) btnModeOff.classList.toggle('active', mode === 'off');
+
+  if (mode === 'on') {
+    startCountdown(timestamp);
+  } else {
+    state.manualOnTimestamp = 0;
+    stopCountdown();
+  }
+
+  updatePostCount();
+  if (previousMode !== mode) {
+    renderFeed(true); // Only re-render feed and empty-state on actual mode change!
+  }
+}
+
+function changeMode(mode) {
+  const timestamp = mode === 'on' ? Date.now() : 0;
+  state.manualOnTimestamp = timestamp;
+  setModeUI(mode, timestamp);
+  try {
+    if (port) {
+      port.postMessage({ type: 'SET_MODE', mode, manualOnTimestamp: timestamp });
+    }
+    chrome.runtime.sendMessage({ type: 'SET_MODE', mode, manualOnTimestamp: timestamp });
+    chrome.storage.local.set({ monitorMode: mode, manualOnTimestamp: timestamp });
+  } catch (e) {
+    // context may be invalid
+  }
+}
+
+if (btnModeAuto) btnModeAuto.addEventListener('click', () => changeMode('auto'));
+if (btnModeOn) btnModeOn.addEventListener('click', () => changeMode('on'));
+if (btnModeOff) btnModeOff.addEventListener('click', () => changeMode('off'));
 
 
 // ── Audio Chime ──────────────────────────────────────────────────────────
@@ -331,11 +465,47 @@ toastClose.addEventListener('click', () => {
   if (toastTimer) clearTimeout(toastTimer);
 });
 
+// ── Market Hours (9:00 AM - 3:30 PM IST Daily) ───────────────────────────
+function isMarketHours(date = new Date()) {
+  const utcMs = date.getTime() + date.getTimezoneOffset() * 60000;
+  const istDate = new Date(utcMs + 5.5 * 3600000);
+  const minutes = istDate.getHours() * 60 + istDate.getMinutes();
+  return minutes >= 540 && minutes <= 930;
+}
+
 // ── Post Count ───────────────────────────────────────────────────────────
 function updatePostCount() {
   const count = state.rawTweets.length;
+  const dot = document.getElementById('status-dot');
+
+  if (!backendConnected) {
+    postCountLabel.textContent = 'Local backend offline';
+    if (dot) dot.className = 'status-dot error';
+    return;
+  }
+
+  if (state.monitorMode === 'off') {
+    postCountLabel.textContent = 'Monitoring paused (Manual OFF)';
+    if (dot) dot.className = 'status-dot paused';
+    return;
+  }
+
+  if (state.monitorMode === 'on') {
+    postCountLabel.textContent = count === 0
+      ? 'Manual ON — waiting for posts'
+      : `${count} posts indexed (Manual ON)`;
+    if (dot) dot.className = 'status-dot';
+    return;
+  }
+
+  // Auto mode
+  if (dot) dot.className = 'status-dot';
   if (count === 0) {
-    postCountLabel.textContent = 'Connecting...';
+    const isOffMarket = !isMarketHours();
+    postCountLabel.textContent = isOffMarket
+      ? 'Active 9:00 AM – 3:30 PM (Auto)'
+      : 'Connected — waiting for posts';
+    if (isOffMarket && dot) dot.className = 'status-dot paused';
   } else {
     postCountLabel.textContent = `${count} posts indexed`;
   }
@@ -344,7 +514,7 @@ function updatePostCount() {
 // ── Render Feed ──────────────────────────────────────────────────────────
 function renderFeed(force = false) {
   const displayList = state.rawTweets.slice(0, state.maxCount);
-  const currentSignature = `${state.maxCount}-${displayList.map((t) => t.id).join(',')}`;
+  const currentSignature = `${state.monitorMode}-${state.maxCount}-${displayList.map((t) => t.id).join(',')}`;
 
   if (!force && currentSignature === renderedTweetSignature) {
     updateTimestampsOnly();
@@ -354,10 +524,36 @@ function renderFeed(force = false) {
   renderedTweetSignature = currentSignature;
 
   if (displayList.length === 0) {
+    const isOffMarket = !isMarketHours();
+    let title = 'Waiting for tweets...';
+    let sub = '';
+
+    if (state.monitorMode === 'off') {
+      title = 'Monitoring is paused';
+      sub = 'Click ON or Auto above to resume';
+    } else if (state.monitorMode === 'auto' && isOffMarket) {
+      title = 'New tweets will display between 9:00 AM – 3:30 PM';
+      sub = 'Market hours: Daily 9:00 AM – 3:30 PM (IST)';
+    } else if (state.rawTweets.length === 0) {
+      title = 'Waiting for tweets...';
+      let countdownText = '';
+      if (state.monitorMode === 'on' && !isMarketHours() && state.manualOnTimestamp) {
+        const elapsedMs = Date.now() - state.manualOnTimestamp;
+        const remaining = Math.max(0, Math.ceil((5 * 60 * 1000 - elapsedMs) / 1000));
+        countdownText = ` · Auto-off in ${formatCountdown(remaining)}`;
+      }
+      sub = state.monitorMode === 'on'
+        ? `Manual ON mode active${countdownText}`
+        : '';
+    } else {
+      title = 'No posts matching this filter';
+    }
+
     feedContainer.innerHTML = `
       <div class="empty-state">
         <div class="empty-state-icon">𝕏</div>
-        <p>${state.rawTweets.length === 0 ? 'Waiting for tweets...' : 'No posts matching this filter'}</p>
+        <p class="empty-state-title">${title}</p>
+        ${sub ? `<span class="empty-state-sub">${sub}</span>` : ''}
       </div>
     `;
     return;
@@ -575,7 +771,12 @@ function highlightEntities(text) {
 }
 
 function escapeHTML(str) {
-  return (str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  return (str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -595,3 +796,50 @@ connectPort();
 
 console.log('[X-Monitor Panel] Initialized (port + chrome.storage.local sync, no polling)');
 
+
+// ── Orphaned-window watchdog ─────────────────────────────────────────────
+// Reloading the extension in chrome://extensions invalidates THIS window's
+// runtime context. The window stays open and keeps rendering whatever it last
+// drew — forever, with no error — which is indistinguishable from a live panel
+// that has simply stopped receiving posts. Detect the dead context and say so
+// out loud instead of showing stale posts as if they were current.
+(function watchForInvalidatedContext() {
+  const BANNER_ID = 'xm-stale-banner';
+
+  function contextAlive() {
+    try {
+      return Boolean(chrome.runtime && chrome.runtime.id);
+    } catch {
+      return false;
+    }
+  }
+
+  setInterval(() => {
+    if (contextAlive() || document.getElementById(BANNER_ID)) return;
+
+    const banner = document.createElement('div');
+    banner.id = BANNER_ID;
+    banner.innerHTML =
+      '<strong>This window is disconnected.</strong><br>' +
+      'The extension was reloaded. Close this window and click the ' +
+      'X Monitor toolbar icon to reopen it. Posts shown below are stale.';
+    Object.assign(banner.style, {
+      position: 'fixed',
+      top: '0',
+      left: '0',
+      right: '0',
+      zIndex: '99999',
+      padding: '10px 14px',
+      background: '#b91c1c',
+      color: '#fff',
+      font: '12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      textAlign: 'center',
+      boxShadow: '0 2px 12px rgba(0,0,0,.45)',
+    });
+    document.body.appendChild(banner);
+
+    // Grey out the stale cards so they can't be mistaken for live ones.
+    const feed = document.getElementById('feed-container');
+    if (feed) feed.style.opacity = '0.45';
+  }, 3000);
+})();

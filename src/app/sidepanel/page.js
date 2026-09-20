@@ -3,22 +3,92 @@
 import { useState, useEffect, useRef } from 'react';
 import useSWR from 'swr';
 import { getAccountMeta } from '@/lib/accounts';
+import { isMarketHours } from '@/lib/marketHours';
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
 export default function SidePanel() {
   const [activeCategory, setActiveCategory] = useState('All');
   const [maxCount, setMaxCount] = useState(3);
+  const [mode, setMode] = useState('auto'); // 'auto' | 'on' | 'off'
+  const [countdown, setCountdown] = useState(null); // seconds remaining
   const [showUpdateToast, setShowUpdateToast] = useState(false);
   const [newIds, setNewIds] = useState(new Set());
   const [expandedId, setExpandedId] = useState(null);
   const knownIdsRef = useRef(new Set());
 
-  const { data, error, mutate, isValidating } = useSWR('/api/tweets', fetcher, {
-    refreshInterval: 1500, // 1.5s instant polling
-    revalidateOnFocus: true,
-    dedupingInterval: 500,
-  });
+  // Format countdown seconds as M:SS (e.g. 4:59)
+  const formatCountdown = (secs) => {
+    if (secs == null) return 'ON';
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  const handleSetMode = (nextMode) => {
+    if (nextMode === 'on') {
+      localStorage.setItem('manualOnTimestamp', String(Date.now()));
+    } else {
+      localStorage.removeItem('manualOnTimestamp');
+    }
+    setMode(nextMode);
+  };
+
+  // 1. Live Countdown & Auto-off: If ON outside market hours, tick down 5 mins using persistent timestamp
+  useEffect(() => {
+    if (mode !== 'on') {
+      setCountdown(null);
+      return;
+    }
+
+    if (!isMarketHours()) {
+      let ts = Number(localStorage.getItem('manualOnTimestamp'));
+      if (!ts || isNaN(ts)) {
+        ts = Date.now();
+        localStorage.setItem('manualOnTimestamp', String(ts));
+      }
+
+      const tick = () => {
+        const elapsed = Date.now() - ts;
+        const remaining = Math.max(0, Math.ceil((5 * 60 * 1000 - elapsed) / 1000));
+        if (remaining <= 0) {
+          localStorage.removeItem('manualOnTimestamp');
+          setCountdown(null);
+          setMode('off');
+        } else {
+          setCountdown(remaining);
+        }
+      };
+
+      tick();
+      const interval = setInterval(tick, 1000);
+      return () => clearInterval(interval);
+    } else {
+      localStorage.removeItem('manualOnTimestamp');
+      setCountdown(null);
+    }
+  }, [mode]);
+
+  // 2. Auto-start: At 9:00 AM IST (Daily), auto-start if currently OFF
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (isMarketHours() && mode === 'off') {
+        handleSetMode('on');
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [mode]);
+
+  const apiUrl = mode === 'on' ? '/api/tweets?force=1' : '/api/tweets';
+  const { data, error, mutate, isValidating } = useSWR(
+    mode === 'off' ? null : apiUrl,
+    fetcher,
+    {
+      refreshInterval: mode === 'off' ? 0 : 1500, // 1.5s instant polling when active
+      revalidateOnFocus: mode !== 'off',
+      dedupingInterval: 500,
+    }
+  );
 
   const rawTweets = data?.tweets || [];
 
@@ -66,14 +136,66 @@ export default function SidePanel() {
           </div>
           <div className="flex items-center gap-1.5">
             <span className="font-bold text-[13px] tracking-tight">X Monitor</span>
-            <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-mono bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              LIVE
-            </span>
+            {mode === 'off' ? (
+              <span className="flex items-center gap-1 text-[10px] text-zinc-400 font-mono bg-white/[0.06] px-1.5 py-0.5 rounded-full border border-white/[0.08]">
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                OFF
+              </span>
+            ) : mode === 'on' ? (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-mono bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                MANUAL ON
+              </span>
+            ) : data?.marketHours === false ? (
+              <span className="flex items-center gap-1 text-[10px] text-amber-400 font-mono bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                AUTO SLEEP
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-mono bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                LIVE
+              </span>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* Mode Selector (Auto / ON / OFF) */}
+          <div className="flex items-center bg-white/[0.06] rounded-full p-0.5 border border-white/[0.08] text-[10.5px] font-medium">
+            <button
+              onClick={() => handleSetMode('auto')}
+              title="Auto: Active during market hours (9:00 AM – 3:30 PM IST Daily)"
+              className={`px-2 py-0.5 rounded-full transition-all cursor-pointer ${
+                mode === 'auto' ? 'bg-white text-black font-bold shadow-xs' : 'text-[#71767b] hover:text-white'
+              }`}
+            >
+              Auto
+            </button>
+            <button
+              onClick={() => handleSetMode('on')}
+              title={
+                countdown !== null
+                  ? `Manual ON: Auto-turning off in ${formatCountdown(countdown)}`
+                  : 'Manual ON: Force live monitoring (bypasses market hours)'
+              }
+              className={`px-2 py-0.5 rounded-full transition-all cursor-pointer font-mono min-w-[38px] text-center ${
+                mode === 'on' ? 'bg-emerald-500 text-white font-bold shadow-xs' : 'text-[#71767b] hover:text-white'
+              }`}
+            >
+              {mode === 'on' && countdown !== null ? formatCountdown(countdown) : 'ON'}
+            </button>
+            <button
+              onClick={() => handleSetMode('off')}
+              title="Manual OFF: Completely sleep/stop polling"
+              className={`px-2 py-0.5 rounded-full transition-all cursor-pointer ${
+                mode === 'off' ? 'bg-red-500 text-white font-bold shadow-xs' : 'text-[#71767b] hover:text-white'
+              }`}
+            >
+              OFF
+            </button>
+          </div>
+
           {/* Tweet Count Selector (3 vs 5) */}
           <div className="flex items-center bg-white/[0.06] rounded-full p-0.5 border border-white/[0.08] text-[11px] font-medium">
             <button
@@ -109,7 +231,7 @@ export default function SidePanel() {
 
       {/* ── Scrollable Post Feed (Independent scroll container) ── */}
       <main className="flex-1 min-h-0 px-2.5 py-2.5 overflow-y-auto overflow-x-hidden flex flex-col gap-2.5">
-        {!data && !error && (
+        {!data && !error && mode !== 'off' && (
           <div className="flex flex-col gap-2.5 pt-1">
             {[1, 2, 3].map((n) => (
               <div key={n} className="flex-none bg-[#111114] border border-white/[0.06] rounded-xl p-3.5 space-y-2.5 animate-pulse">
@@ -126,12 +248,29 @@ export default function SidePanel() {
           </div>
         )}
 
-        {displayTweets.length === 0 && data && (
-          <div className="py-12 text-center text-[#71767b] space-y-2">
-            <div className="w-8 h-8 rounded-full bg-white/[0.04] flex items-center justify-center mx-auto text-sm">
+        {displayTweets.length === 0 && (data || mode === 'off') && (
+          <div className="py-16 text-center text-[#71767b] space-y-2 flex flex-col items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mx-auto text-base text-zinc-300">
               𝕏
             </div>
-            <p className="text-xs">No posts available</p>
+            <p className="text-[13.5px] font-medium text-zinc-200 max-w-[280px] leading-relaxed">
+              {mode === 'off'
+                ? 'Monitoring is paused'
+                : mode === 'auto' && data?.marketHours === false
+                ? 'New tweets will display between 9:00 AM – 3:30 PM'
+                : 'Waiting for tweets...'}
+            </p>
+            {mode === 'off' && (
+              <span className="text-[11.5px] text-[#71767b]">Click ON or Auto above to resume monitoring</span>
+            )}
+            {mode === 'auto' && data?.marketHours === false && (
+              <span className="text-[11.5px] text-[#71767b]">Market hours: Daily 9:00 AM – 3:30 PM (IST)</span>
+            )}
+            {mode === 'on' && (
+              <span className="text-[11.5px] text-emerald-400 font-mono">
+                Manual ON mode active {countdown !== null ? `· Auto-off in ${formatCountdown(countdown)}` : ''}
+              </span>
+            )}
           </div>
         )}
 
@@ -150,8 +289,16 @@ export default function SidePanel() {
       {/* ── Fixed Footer ── */}
       <footer className="flex-none bg-[#0a0a0c]/95 backdrop-blur-md border-t border-white/[0.08] px-3.5 py-2.5 flex items-center justify-between text-[11px] text-[#71767b] z-10">
         <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary)]" />
-          <span>{rawTweets.length} posts indexed</span>
+          <span className={`w-1.5 h-1.5 rounded-full ${mode === 'off' ? 'bg-zinc-500' : 'bg-[var(--accent-primary)]'}`} />
+          <span>
+            {mode === 'off'
+              ? 'Monitoring paused (Manual OFF)'
+              : mode === 'on'
+              ? `${rawTweets.length} posts indexed (Manual ON)`
+              : data?.marketHours === false
+              ? 'Active 9:00 AM – 3:30 PM (Auto)'
+              : `${rawTweets.length} posts indexed`}
+          </span>
         </div>
         <a
           href="/"

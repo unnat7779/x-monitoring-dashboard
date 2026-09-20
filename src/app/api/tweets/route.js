@@ -1,18 +1,44 @@
 import { NextResponse } from 'next/server';
 import { getTweets, getTweetsSince } from '@/lib/store';
+import { isMarketHours, getMarketStatus } from '@/lib/marketHours';
 
 /**
  * GET /api/tweets
  *
  * Returns stored tweets from database/S3 cache.
- * Makes 0 external API calls so you have 100% control over your TwitterAPI.io credits.
- * Credits are ONLY consumed when you turn ON your filter rule in TwitterAPI.io.
+ * Active window: 9:00 AM - 3:30 PM IST (Daily) to minimize Vercel usage.
  */
 export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
+    const force =
+      searchParams.get('force') === '1' ||
+      searchParams.get('force') === 'true' ||
+      request.headers.get('x-force-poll') === '1';
+
+    const marketActive = isMarketHours();
+
+    // If outside market hours and NOT manually forced, return off-hours response with Edge caching
+    // so Vercel CDN serves it without invoking the Serverless Function.
+    if (!marketActive && !force) {
+      return NextResponse.json(
+        {
+          tweets: [],
+          count: 0,
+          marketHours: false,
+          message: 'Outside market hours (9:00 AM - 3:30 PM IST Daily). Backend in power-save mode.',
+          marketStatus: getMarketStatus(),
+        },
+        {
+          headers: {
+            'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+            'X-Market-Hours': 'closed',
+          },
+        }
+      );
+    }
     const since = searchParams.get('since');
     const account = searchParams.get('account');
 

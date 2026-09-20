@@ -5,9 +5,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "node scripts/stream-listener.mjs & next start",
+    "start": "node scripts/run-local.mjs",
     "stream": "node scripts/stream-listener.mjs",
-    "lint": "eslint"
+    "lint": "eslint",
+    "local": "node scripts/run-local.mjs",
+    "autostart": "bash scripts/install-autostart.sh",
+    "autostart:remove": "bash scripts/install-autostart.sh --uninstall"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1114.0",

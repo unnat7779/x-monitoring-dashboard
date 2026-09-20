@@ -18,6 +18,13 @@
       </div>
 
       <div class="header-actions">
+        <!-- Power / Mode Toggle (Auto / ON / OFF) -->
+        <div class="mode-toggle" id="mode-toggle">
+          <button id="btn-mode-auto" class="mode-btn active" title="Auto: Active during market hours (9:00 AM – 3:30 PM IST Daily)">Auto</button>
+          <button id="btn-mode-on" class="mode-btn" title="Manual ON: Force live monitoring (bypasses market hours)">ON</button>
+          <button id="btn-mode-off" class="mode-btn" title="Manual OFF: Completely sleep/stop polling">OFF</button>
+        </div>
+
         <!-- Count Toggle (3 vs 5) -->
         <div class="count-toggle">
           <button id="btn-count-3" class="count-btn active">3</button>
@@ -72,7 +79,7 @@
         <span class="status-dot" id="status-dot"></span>
         <span id="post-count-label">Connecting...</span>
       </div>
-      <a id="link-full-terminal" href="https://x-monitoring-dashboard.onrender.com" target="_blank" class="full-terminal-link">
+      <a id="link-full-terminal" href="https://x-monitoring-dashboard.vercel.app" target="_blank" class="full-terminal-link">
         <span>Open Full Terminal</span>
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
