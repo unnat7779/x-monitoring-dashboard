@@ -308,10 +308,6 @@ function pruneHistory() {
 const CLIENT_AUTH = 'x-monitor-extension-client';
 const POLL_TOKEN = '91cfc4bf72d6c68f78f02eac95fb7ed065bc3da2b56abb58';
 
-function getBaseInterval() {
-  return pusherConnected ? PUSHER_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
-}
-
 async function fetchFeed(headers) {
   const ordered = [activeEndpoint, ...ENDPOINTS.filter((u) => u !== activeEndpoint)];
   let lastErr = null;
@@ -337,7 +333,7 @@ async function fetchFeed(headers) {
 
 function onPollSuccess() {
   consecutiveFailures = 0;
-  currentIntervalMs = getBaseInterval();
+  currentIntervalMs = POLL_INTERVAL_MS;
   if (!backendUp) {
     backendUp = true;
     console.log(`[X-Monitor BG] Backend reachable at ${activeEndpoint}`);
@@ -350,7 +346,7 @@ function onPollFailure(err) {
   consecutiveFailures += 1;
   currentIntervalMs = Math.min(
     BACKOFF_MAX_MS,
-    getBaseInterval() * Math.pow(2, Math.min(consecutiveFailures, 4))
+    POLL_INTERVAL_MS * Math.pow(2, Math.min(consecutiveFailures, 4))
   );
   if (backendUp || consecutiveFailures === 1) {
     backendUp = false;
@@ -483,9 +479,10 @@ function connectPusher() {
               data: { channel: PUSHER_CHANNEL },
             })
           );
-          // With Pusher active, keep a gentle 60s fallback poll so extension never misses
-          // posts if service worker sleeps, and run an immediate backfill poll.
-          currentIntervalMs = PUSHER_POLL_INTERVAL_MS;
+          // With Pusher active, stop polling completely to burn 0 Vercel credits.
+          // Pusher delivers all live posts in real time.
+          // We run ONE single initial poll now to catch up on any missed history.
+          stopPolling();
           pollOnce();
           pushStatus('pusher_connected');
         } else if (msg.event === 'pusher:ping') {
@@ -508,7 +505,7 @@ function connectPusher() {
 
     pusherWs.onclose = () => {
       pusherConnected = false;
-      console.log('[X-Monitor Pusher] Disconnected — reverting to standard 10s polling');
+      console.log('[X-Monitor Pusher] Disconnected — falling back to polling');
       currentIntervalMs = POLL_INTERVAL_MS;
       if (shouldPoll()) {
         startPolling();
@@ -594,8 +591,8 @@ let pollGeneration = 0;
 
 function startPolling() {
   if (pollTimer !== null) return;
-  currentIntervalMs = getBaseInterval();
-  console.log(`[X-Monitor BG] Polling started (${mode}, ${currentIntervalMs}ms)`);
+  currentIntervalMs = POLL_INTERVAL_MS;
+  console.log(`[X-Monitor BG] Polling started (${mode}, ${POLL_INTERVAL_MS}ms)`);
   const gen = ++pollGeneration;
 
   const tick = async () => {
@@ -680,7 +677,7 @@ function reconcile(reason = '') {
   }
   if (shouldPoll()) {
     connectPusher();
-    startPolling();
+    if (!pusherConnected) startPolling();
   } else {
     stopPolling();
     disconnectPusher();
@@ -791,6 +788,11 @@ chrome.runtime.onConnect.addListener((port) => {
     clearBadge();
     reconcile('panel_connect');
     port.postMessage({ type: 'INIT', tweets: tweetHistory, ...statusPayload() });
+
+    // Catch-up: fetch freshest feed once upon opening the panel
+    if (shouldPoll()) {
+      pollOnce().catch(() => {});
+    }
 
     port.onMessage.addListener((msg) => {
       if (msg?.type === 'SET_MODE') setMode(msg.mode, 'panel');
