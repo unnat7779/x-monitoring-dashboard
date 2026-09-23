@@ -336,10 +336,11 @@ function renderStatus() {
   if (state.mode === 'on') {
     text = `Manual ON · ${formatCountdown(remainingOnSeconds())} left`;
     if (!state.connected) dot += ' error';
-  } else if (!state.polling) {
-    if (state.marketOpen) text = 'Starting…';
-    else if (state.nextEdge) text = `Idle · resumes ${formatIstClock(state.nextEdge)} IST`;
-    else text = 'Idle';
+  } else if (!state.marketOpen && state.mode !== 'on') {
+    text = state.nextEdge ? `Idle · resumes ${formatIstClock(state.nextEdge)} IST` : 'Idle';
+    dot += ' paused';
+  } else if (!state.connected && !state.polling) {
+    text = 'Starting…';
     dot += ' paused';
   } else if (!state.connected) {
     text = 'Backend unreachable — retrying';

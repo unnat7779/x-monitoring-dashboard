@@ -18,7 +18,8 @@ const ENDPOINTS = [
   'http://localhost:3000/api/tweets',
 ];
 
-const POLL_INTERVAL_MS = 10000;  // 10s — keeps us within Vercel's 100K/month free tier
+const POLL_INTERVAL_MS = 10000;  // 10s default polling when Pusher is disconnected
+const PUSHER_POLL_INTERVAL_MS = 60000; // 60s gentle safety net while Pusher is active
 const BACKOFF_MAX_MS = 60000;    // back off up to 60s when backend is unreachable
 const FETCH_TIMEOUT_MS = 10000;
 const MAX_HISTORY = 50;              // the API sends at most this many anyway
@@ -214,8 +215,9 @@ function statusPayload() {
   return {
     mode,
     manualOnUntil,
-    polling: pollTimer !== null,
-    connected: backendUp,
+    polling: pollTimer !== null || pusherConnected,
+    connected: backendUp || pusherConnected,
+    pusherConnected,
     marketOpen: isMarketHours(),
     nextEdge: nextMarketEdge(),
     apiUrl: activeEndpoint,
@@ -304,16 +306,22 @@ function pruneHistory() {
 // us at 9:00:01 or during a manual ON window.
 // `client` identifies authentic extension requests so random internet scanners can't drain invocations.
 const CLIENT_AUTH = 'x-monitor-extension-client';
+const POLL_TOKEN = '91cfc4bf72d6c68f78f02eac95fb7ed065bc3da2b56abb58';
+
+function getBaseInterval() {
+  return pusherConnected ? PUSHER_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
+}
 
 async function fetchFeed(headers) {
   const ordered = [activeEndpoint, ...ENDPOINTS.filter((u) => u !== activeEndpoint)];
   let lastErr = null;
   for (const url of ordered) {
     try {
-      const res = await fetch(`${url}?force=1&client=${CLIENT_AUTH}`, {
+      const res = await fetch(`${url}?force=1&client=${CLIENT_AUTH}&token=${POLL_TOKEN}`, {
         headers: {
           ...headers,
           'x-client-id': CLIENT_AUTH,
+          'x-poll-token': POLL_TOKEN,
         },
         cache: 'no-store',
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -329,7 +337,7 @@ async function fetchFeed(headers) {
 
 function onPollSuccess() {
   consecutiveFailures = 0;
-  currentIntervalMs = POLL_INTERVAL_MS;
+  currentIntervalMs = getBaseInterval();
   if (!backendUp) {
     backendUp = true;
     console.log(`[X-Monitor BG] Backend reachable at ${activeEndpoint}`);
@@ -342,7 +350,7 @@ function onPollFailure(err) {
   consecutiveFailures += 1;
   currentIntervalMs = Math.min(
     BACKOFF_MAX_MS,
-    POLL_INTERVAL_MS * Math.pow(2, Math.min(consecutiveFailures, 4))
+    getBaseInterval() * Math.pow(2, Math.min(consecutiveFailures, 4))
   );
   if (backendUp || consecutiveFailures === 1) {
     backendUp = false;
@@ -475,10 +483,11 @@ function connectPusher() {
               data: { channel: PUSHER_CHANNEL },
             })
           );
-          // With Pusher active, stop background polling loop entirely.
-          // We do ONE initial poll to make sure history is up to date, then let Pusher handle all updates.
-          stopPolling();
+          // With Pusher active, keep a gentle 60s fallback poll so extension never misses
+          // posts if service worker sleeps, and run an immediate backfill poll.
+          currentIntervalMs = PUSHER_POLL_INTERVAL_MS;
           pollOnce();
+          pushStatus('pusher_connected');
         } else if (msg.event === 'pusher:ping') {
           pusherWs.send(JSON.stringify({ event: 'pusher:pong', data: {} }));
         } else if (msg.event === 'new-tweets') {
@@ -499,11 +508,13 @@ function connectPusher() {
 
     pusherWs.onclose = () => {
       pusherConnected = false;
-      console.log('[X-Monitor Pusher] Disconnected — falling back to polling');
+      console.log('[X-Monitor Pusher] Disconnected — reverting to standard 10s polling');
+      currentIntervalMs = POLL_INTERVAL_MS;
       if (shouldPoll()) {
         startPolling();
         schedulePusherReconnect();
       }
+      pushStatus('pusher_disconnected');
     };
 
     pusherWs.onerror = (err) => {
@@ -583,8 +594,8 @@ let pollGeneration = 0;
 
 function startPolling() {
   if (pollTimer !== null) return;
-  console.log(`[X-Monitor BG] Polling started (${mode}, ${POLL_INTERVAL_MS}ms)`);
-  currentIntervalMs = POLL_INTERVAL_MS;
+  currentIntervalMs = getBaseInterval();
+  console.log(`[X-Monitor BG] Polling started (${mode}, ${currentIntervalMs}ms)`);
   const gen = ++pollGeneration;
 
   const tick = async () => {
@@ -669,7 +680,7 @@ function reconcile(reason = '') {
   }
   if (shouldPoll()) {
     connectPusher();
-    if (!pusherConnected) startPolling();
+    startPolling();
   } else {
     stopPolling();
     disconnectPusher();
