@@ -14,6 +14,8 @@ const KNOWN_USERS_BY_ID = {
   '1933369219': { username: 'yatinmota', name: 'Yatin Mota' },
   '2859443173': { username: 'darshanvmehta1', name: 'Darshan Mehta' },
   '728571299228876800': { username: 'soumeet_sarkar', name: 'Soumeet Sarkar' },
+  '44839509': { username: 'CNBCTV18Live', name: 'CNBC-TV18 Live' },
+  '1077676619349712896': { username: 'Sharad9Dubey', name: 'Sharad Dubey' },
 };
 
 // Last-resort matching when a payload carries neither a usable ID nor handle.
@@ -32,6 +34,7 @@ const NAME_HINTS = [
   [/bloomberg/, 'business', 'Bloomberg'],
   [/\bpti\b/, 'PTI_News', 'PTI News'],
   [/et\s*now/, 'ETNOWlive', 'ET NOW'],
+  [/sharad/, 'Sharad9Dubey', 'Sharad Dubey'],
 ];
 
 /**

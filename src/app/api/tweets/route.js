@@ -45,13 +45,20 @@ export async function GET(request) {
     const clientId = searchParams.get('client') || request.headers.get('x-client-id');
     const isAuthorized =
       clientId === 'x-monitor-extension-client' ||
+      clientId === 'equinexx-dashboard' ||
       (pollToken && providedToken === pollToken) ||
       !pollToken;
 
     if (pollToken && !isAuthorized) {
       return NextResponse.json(
         { error: 'Unauthorized' },
-        { status: 401, headers: { 'Cache-Control': 'no-store' } }
+        {
+          status: 401,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
       );
     }
 
@@ -66,7 +73,12 @@ export async function GET(request) {
           message: 'Outside market hours (9:00 AM - 3:30 PM IST Daily). Backend in power-save mode.',
           marketStatus: getMarketStatus(),
         },
-        { headers: OFF_HOURS_HEADERS }
+        {
+          headers: {
+            ...OFF_HOURS_HEADERS,
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
       );
     }
 
@@ -91,6 +103,9 @@ export async function GET(request) {
           ETag: etag,
           'X-Feed-Hash': hash,
           'X-Feed-Timestamp': now,
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, x-client-id, x-poll-token, if-none-match',
         },
       }
     );
@@ -98,7 +113,24 @@ export async function GET(request) {
     console.error('[tweets] Error fetching tweets:', err);
     return NextResponse.json(
       { tweets: [], count: 0, error: 'Failed to fetch tweets' },
-      { status: 500, headers: { 'Cache-Control': 'no-store' } }
+      {
+        status: 500,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*',
+        },
+      }
     );
   }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, x-client-id, x-poll-token, if-none-match',
+    },
+  });
 }

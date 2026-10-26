@@ -171,10 +171,9 @@ The extension carries display metadata (`MONITORED_ACCOUNTS` in
 `extension/panel.js`, `ACCOUNT_META` in `extension/background.js`) for 19
 accounts — these are labels and colours only. **What actually streams in is
 the monitored-user list on the TwitterAPI.io streamer plan** (billed per
-account; currently a 5-account plan). As of 2026-09-20 the API lists six:
-@moneycontrolcom, @NDTVProfit, @LiveLawIndia, @yatinmota, @darshanvmehta1,
-@soumeet_sarkar. Changing the set is a dashboard/plan action; nothing in this
-repo needs to change.
+account; currently a 6-account plan). As of 2026-10-26 the API lists six:
+@NDTVProfit, @yatinmota, @darshanvmehta1, @soumeet_sarkar, @CNBCTV18Live,
+and @Sharad9Dubey. Changing the set is a dashboard/plan action.
 
 ---
 

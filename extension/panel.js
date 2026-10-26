@@ -27,6 +27,7 @@ const MONITORED_ACCOUNTS = [
   { handle: 'SoumeetSarkar', name: 'Soumeet Sarkar', color: '#c084fc' },
   { handle: 'soumeet_sarkar', name: 'Soumeet Sarkar', color: '#c084fc' },
   { handle: 'SharadDubey_', name: 'Sharad Dubey', color: '#c084fc' },
+  { handle: 'Sharad9Dubey', name: 'Sharad Dubey', color: '#c084fc' },
   { handle: 'LakshmanRoy1', name: 'Lakshman Roy', color: '#c084fc' },
   { handle: 'shukla_tarun', name: 'Tarun Shukla', color: '#c084fc' },
 ];
@@ -184,9 +185,30 @@ function handlePortMessage(msg) {
       if (msg.reason === 'manual_on_expired') showToast('Manual ON ended — back to Auto');
       break;
     case 'FEED':
-      applyTweets(msg.tweets, msg.newCount);
+      applyTweets(msg.tweets, msg.newCount, msg.newTweets);
       break;
   }
+}
+
+function isYatinOrSoumeet(tweet) {
+  if (!tweet) return false;
+  const username = (tweet.author?.username || '').replace(/^@/, '').toLowerCase();
+  if (
+    username === 'yatinmota' ||
+    username === 'soumeet_sarkar' ||
+    username === 'soumeetsarkar'
+  ) {
+    return true;
+  }
+  const id = String(tweet.author?.id || tweet.userId || tweet.author_id || '');
+  if (id === '1933369219' || id === '728571299228876800') {
+    return true;
+  }
+  const name = (tweet.author?.name || '').toLowerCase();
+  if (name.includes('yatin') || name.includes('soumeet')) {
+    return true;
+  }
+  return false;
 }
 
 function applyStatus(s) {
@@ -201,14 +223,26 @@ function applyStatus(s) {
   renderFeed();
 }
 
-function applyTweets(tweets, newCount) {
+function applyTweets(tweets, newCount, incomingNewTweets = []) {
   const now = Date.now();
   state.rawTweets = (Array.isArray(tweets) ? tweets : []).filter((t) => isFresh(t, now));
   renderFeed();
   renderStatus();
   if (newCount > 0) {
-    showToast(newCount === 1 ? 'New breaking post received' : `${newCount} new posts received`);
-    playChime();
+    const freshTweets = (Array.isArray(incomingNewTweets) && incomingNewTweets.length > 0)
+      ? incomingNewTweets
+      : (Array.isArray(tweets) ? tweets.slice(0, newCount) : []);
+
+    const hasPriorityAnalyst = freshTweets.some(isYatinOrSoumeet);
+    if (hasPriorityAnalyst) {
+      const analystTweet = freshTweets.find(isYatinOrSoumeet);
+      const name = analystTweet?.author?.name || 'Analyst';
+      showToast(freshTweets.length === 1 ? `⚡ ${name} posted` : `⚡ ${name} + ${freshTweets.length - 1} new posts`);
+      playAnalystChime();
+    } else {
+      showToast(newCount === 1 ? 'New breaking post received' : `${newCount} new posts received`);
+      playDefaultChime();
+    }
   }
 }
 
@@ -293,22 +327,76 @@ toastClose.addEventListener('click', () => {
   if (toastTimer) clearTimeout(toastTimer);
 });
 
-function playChime() {
+function playDefaultChime() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
     osc.connect(gain);
     gain.connect(ctx.destination);
-    osc.start();
+    osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.25);
   } catch (e) {
     // audio unavailable
   }
+}
+
+// Distinct signature sound for Yatin Mota & Soumeet Sarkar:
+// Two-tone ascending harmonic alert (A5 880 Hz -> E6 1318.5 Hz)
+function playAnalystChime() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const t0 = ctx.currentTime;
+
+    // Tone 1: 880 Hz (A5)
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(880, t0);
+    gain1.gain.setValueAtTime(0.001, t0);
+    gain1.gain.linearRampToValueAtTime(0.09, t0 + 0.015);
+    gain1.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(t0);
+    osc1.stop(t0 + 0.18);
+
+    // Tone 2: 1318.51 Hz (E6) - crisp ascending alert
+    const t1 = t0 + 0.11;
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1318.51, t1);
+    gain2.gain.setValueAtTime(0.001, t1);
+    gain2.gain.linearRampToValueAtTime(0.11, t1 + 0.015);
+    gain2.gain.exponentialRampToValueAtTime(0.001, t1 + 0.35);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(t1);
+    osc2.stop(t1 + 0.35);
+  } catch (e) {
+    // audio unavailable
+  }
+}
+
+function playChime(tweets = []) {
+  if (Array.isArray(tweets) && tweets.some(isYatinOrSoumeet)) {
+    playAnalystChime();
+  } else {
+    playDefaultChime();
+  }
+}
+
+// Expose on window for quick manual testing via panel DevTools console
+if (typeof window !== 'undefined') {
+  window.playDefaultChime = playDefaultChime;
+  window.playAnalystChime = playAnalystChime;
+  window.isYatinOrSoumeet = isYatinOrSoumeet;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

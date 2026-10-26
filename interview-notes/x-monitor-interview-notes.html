@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>X Monitor Interview Notes</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  :root {
+    --ink: #1c2230; --muted: #5b6475; --line: #d9dee7; --accent: #1f5fbf;
+    --hi-bg: #fff7e0; --hi-bd: #e6b422;
+    --say-bg: #e9f1ff; --say-bd: #1f5fbf;
+    --ex-bg: #eaf7ee; --ex-bd: #2e9d57;
+    --warn-bg: #fdeceb; --warn-bd: #c8443a;
+    --code-bg: #f3f5f8;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink);
+         font-size: 10.6pt; line-height: 1.5; margin: 0; background: #fff; }
+  h1 { font-size: 24pt; margin: 0 0 4pt; letter-spacing: -0.3pt; }
+  h2 { font-size: 15pt; color: var(--accent); margin: 18pt 0 6pt; padding-bottom: 3pt; border-bottom: 1.5pt solid var(--accent); }
+  h3 { font-size: 11.8pt; margin: 12pt 0 4pt; }
+  p { margin: 4pt 0 6pt; }
+  ul, ol { margin: 3pt 0 6pt; padding-left: 16pt; }
+  li { margin: 2pt 0; }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.8pt; }
+  code { background: var(--code-bg); padding: 0 3pt; border-radius: 3pt; }
+  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 5pt; padding: 7pt 9pt; white-space: pre-wrap; margin: 5pt 0 8pt; line-height: 1.4; }
+  .box { border-left: 4pt solid; border-radius: 4pt; padding: 6pt 10pt; margin: 7pt 0; break-inside: avoid; }
+  .box .tag { font-size: 8pt; font-weight: 700; letter-spacing: 0.6pt; text-transform: uppercase; display: block; margin-bottom: 2pt; }
+  .hi { background: var(--hi-bg); border-color: var(--hi-bd); } .hi .tag { color: #9a7300; }
+  .say { background: var(--say-bg); border-color: var(--say-bd); } .say .tag { color: var(--say-bd); }
+  .ex { background: var(--ex-bg); border-color: var(--ex-bd); } .ex .tag { color: #1f7a41; }
+  .warn { background: var(--warn-bg); border-color: var(--warn-bd); } .warn .tag { color: var(--warn-bd); }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 9pt; font-size: 9.6pt; break-inside: avoid; }
+  th, td { border: 1px solid var(--line); padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #eef1f6; }
+  .page-break { break-before: page; }
+  .cover { padding-top: 30mm; }
+  .cover .sub { color: var(--muted); font-size: 12pt; margin-bottom: 18pt; }
+  .resume { border: 1px solid var(--line); border-radius: 6pt; padding: 10pt 12pt; background: #fafbfc; font-size: 10pt; }
+  .legend span { display: inline-block; margin-right: 10pt; font-size: 9pt; }
+  .legend i { display: inline-block; width: 10pt; height: 10pt; border-radius: 2pt; margin-right: 4pt; vertical-align: -1pt; border-left: 3pt solid; }
+  figure { margin: 8pt 0 10pt; break-inside: avoid; }
+  figcaption { font-size: 8.8pt; color: var(--muted); text-align: center; margin-top: 3pt; }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  .qa { break-inside: avoid; margin: 0 0 8pt; }
+  .qa .q { font-weight: 700; }
+  .qa .a { margin-left: 12pt; }
+  .toc li { margin: 1pt 0; }
+  .num { font-weight: 700; color: var(--accent); }
+  .small { font-size: 9pt; color: var(--muted); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; }
+</style>
+</head>
+<body>
+
+<!-- ═════════════════════════ COVER ═════════════════════════ -->
+<section class="cover">
+  <h1>X Monitor — Interview Notes</h1>
+  <div class="sub">A real-time market news tracker: what you built, how to explain it, and the questions you'll get</div>
+
+  <div class="resume">
+    <b>X Monitor</b>: Real-Time Market Sentiment &amp; Tweet Tracker &nbsp;|&nbsp; Next.js, AWS S3, Pusher, Chrome MV3
+    <ul>
+      <li>Built a webhook ingestion pipeline that normalizes and de-duplicates <b>1,000+ tweets a day</b> from <b>20+ channels</b> into an S3 store with optimistic-concurrency writes, pushing breaking market news to a <b>Chrome Extension (MV3)</b> in <b>under 500 ms</b>.</li>
+      <li>Architected event-driven streaming (Pusher WebSockets, HTTP 304 ETag caching), cutting daily outbound bandwidth by <b>99%+ (10 GB+ to ~1 MB)</b> and eliminating <b>6,500+ redundant serverless invocations</b>.</li>
+    </ul>
+  </div>
+
+  <h3>How to read these notes</h3>
+  <div class="legend">
+    <span><i style="background:var(--hi-bg);border-color:var(--hi-bd)"></i>Samjho — explanation in Hinglish, for you</span>
+    <span><i style="background:var(--say-bg);border-color:var(--say-bd)"></i>Interview mein bolo — simple English lines to say</span><br>
+    <span><i style="background:var(--ex-bg);border-color:var(--ex-bd)"></i>Example — a small case to mention</span>
+    <span><i style="background:var(--warn-bg);border-color:var(--warn-bd)"></i>Careful — places interviewers will push</span>
+  </div>
+
+  <h3>Contents</h3>
+  <ol class="toc">
+    <li>The pitch: 30-second and 2-minute versions</li>
+    <li>The whole system on one page (architecture diagram)</li>
+    <li>What an ingestion pipeline is</li>
+    <li>Normalize and de-duplicate: how it works</li>
+    <li>"1,000+ tweets a day from 20+ channels"</li>
+    <li>Why S3?</li>
+    <li>Optimistic-concurrency writes</li>
+    <li>"Under 500 ms": how it's calculated</li>
+    <li>Event-driven streaming: Pusher + ETag/304</li>
+    <li>The numbers: 10 GB → 1 MB and 6,500+ invocations</li>
+    <li>Chrome Extension MV3 details</li>
+    <li>How to draw the architecture on a whiteboard</li>
+    <li>Interview questions and answers (30)</li>
+    <li>Weak spots, trade-offs and what you'd improve</li>
+    <li>One-page cheat sheet</li>
+  </ol>
+</section>
+
+<!-- ═════════════════════════ 1. PITCH ═════════════════════════ -->
+<section class="page-break">
+<h2>1. The pitch</h2>
+
+<div class="box hi"><span class="tag">Samjho</span>
+Simple si baat hai: stock market ke time pe Indian financial news accounts (Moneycontrol, NDTV Profit, analysts) X pe jo bhi breaking post karte hain, woh turant trader ke browser mein ek floating panel aur desktop notification ke roop mein aa jaata hai. Tweets ek third-party service (TwitterAPI.io) se webhook ke through server pe aate hain; server unhe saaf karta hai (normalize), duplicates hata deta hai, S3 mein save karta hai, aur Pusher se seedha Chrome extension ko push kar deta hai. Pehle extension har 2 second mein server se poochta tha "kuch naya hai?" — usme bahut bandwidth aur serverless calls waste hoti thi. Push model se woh waste almost zero ho gaya.
+</div>
+
+<h3>30-second version</h3>
+<div class="box say"><span class="tag">Interview mein bolo</span>
+"X Monitor is a real-time news tracker for Indian stock-market traders. During market hours, posts from financial news accounts on X arrive at my Next.js backend through a webhook. The backend cleans them into one standard format, removes duplicates, saves them in S3, and pushes them to a Chrome extension over Pusher WebSockets. A new post shows up as a desktop notification in under half a second. The first version polled the server every two seconds. Moving to push plus ETag caching cut bandwidth by over 99%."
+</div>
+
+<h3>2-minute version (problem → design → result)</h3>
+<div class="box say"><span class="tag">Interview mein bolo</span>
+<p><b>Problem.</b> "In Indian markets, a headline like 'RBI cuts repo rate' moves prices within seconds. Traders don't want to keep refreshing X. They want the news pushed to them the moment it's posted, from a fixed list of trusted accounts."</p>
+<p><b>Ingestion.</b> "I use TwitterAPI.io's user stream. It calls my webhook, <code>/api/twitter-webhook</code> on Vercel, every time a monitored account posts. The webhook checks a secret, then normalizes the payload, because the provider sends several different JSON shapes. It de-duplicates by tweet ID and merges the result into one JSON document in S3."</p>
+<p><b>Concurrency.</b> "S3 has no append. If two webhook calls land at the same time, one could overwrite the other. So I use optimistic concurrency: read the object with its ETag, then write with <code>If-Match</code>. If someone else wrote in between, S3 returns 412, and I re-read and retry."</p>
+<p><b>Delivery.</b> "After saving, the webhook publishes the new tweets to a Pusher channel. The extension's service worker holds a WebSocket to Pusher, so the tweet lands in the browser in a few hundred milliseconds, and it raises a desktop notification."</p>
+<p><b>Efficiency.</b> "The first version polled every two seconds and downloaded the whole feed each time. I added ETag/304 responses, so an unchanged poll costs zero bytes of body. Then I moved to push, so the extension makes one catch-up request when it connects instead of thousands of polls. Daily outbound data went from over 10 GB to about 1 MB, and thousands of serverless calls a day disappeared."</p>
+</div>
+</section>
+
+<!-- ═════════════════════════ 2. ARCHITECTURE ═════════════════════════ -->
+<section class="page-break">
+<h2>2. The whole system on one page</h2>
+
+<figure>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3a4357"/>
+    </marker>
+    <marker id="arB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f5fbf"/>
+    </marker>
+  </defs>
+  <!-- zone labels -->
+  <text x="85" y="16" font-size="10" fill="#5b6475" text-anchor="middle">SOURCE</text>
+  <text x="378" y="16" font-size="10" fill="#5b6475" text-anchor="middle">BACKEND (Vercel + AWS)</text>
+  <text x="686" y="16" font-size="10" fill="#5b6475" text-anchor="middle">USER'S BROWSER</text>
+
+  <!-- top row boxes -->
+  <rect x="8" y="30" width="124" height="66" rx="8" fill="#f4f6fa" stroke="#3a4357"/>
+  <text x="70" y="58" font-size="12" font-weight="700" text-anchor="middle">X (Twitter)</text>
+  <text x="70" y="76" font-size="9.5" fill="#5b6475" text-anchor="middle">20+ news accounts</text>
+
+  <rect x="162" y="30" width="124" height="66" rx="8" fill="#f4f6fa" stroke="#3a4357"/>
+  <text x="224" y="54" font-size="12" font-weight="700" text-anchor="middle">TwitterAPI.io</text>
+  <text x="224" y="71" font-size="9.5" fill="#5b6475" text-anchor="middle">User Stream</text>
+  <text x="224" y="85" font-size="9.5" fill="#5b6475" text-anchor="middle">(watches accounts)</text>
+
+  <rect x="316" y="22" width="124" height="86" rx="8" fill="#e9f1ff" stroke="#1f5fbf" stroke-width="1.5"/>
+  <text x="378" y="44" font-size="11" font-weight="700" text-anchor="middle">/api/twitter-webhook</text>
+  <text x="378" y="61" font-size="9.5" text-anchor="middle">1. check secret</text>
+  <text x="378" y="74" font-size="9.5" text-anchor="middle">2. normalize</text>
+  <text x="378" y="87" font-size="9.5" text-anchor="middle">3. de-dupe + save</text>
+  <text x="378" y="100" font-size="9.5" text-anchor="middle">4. push</text>
+
+  <rect x="470" y="30" width="124" height="66" rx="8" fill="#f4f6fa" stroke="#3a4357"/>
+  <text x="532" y="56" font-size="12" font-weight="700" text-anchor="middle">Pusher</text>
+  <text x="532" y="73" font-size="9.5" fill="#5b6475" text-anchor="middle">channel "x-monitor"</text>
+  <text x="532" y="86" font-size="9.5" fill="#5b6475" text-anchor="middle">(managed WebSockets)</text>
+
+  <rect x="624" y="30" width="128" height="66" rx="8" fill="#eaf7ee" stroke="#2e9d57" stroke-width="1.5"/>
+  <text x="688" y="52" font-size="11.5" font-weight="700" text-anchor="middle">Chrome Extension</text>
+  <text x="688" y="68" font-size="9.5" text-anchor="middle">MV3 service worker</text>
+  <text x="688" y="82" font-size="9.5" text-anchor="middle">seenIds de-dupe</text>
+
+  <!-- bottom row -->
+  <rect x="316" y="200" width="124" height="66" rx="8" fill="#fff7e0" stroke="#b58900" stroke-width="1.5"/>
+  <text x="378" y="225" font-size="12" font-weight="700" text-anchor="middle">AWS S3</text>
+  <text x="378" y="242" font-size="9.5" text-anchor="middle">tweets.json</text>
+  <text x="378" y="256" font-size="9.5" fill="#5b6475" text-anchor="middle">(today's posts)</text>
+
+  <rect x="470" y="200" width="124" height="66" rx="8" fill="#e9f1ff" stroke="#1f5fbf" stroke-width="1.5"/>
+  <text x="532" y="225" font-size="11.5" font-weight="700" text-anchor="middle">/api/tweets</text>
+  <text x="532" y="242" font-size="9.5" text-anchor="middle">newest 50</text>
+  <text x="532" y="256" font-size="9.5" text-anchor="middle">ETag → 304</text>
+
+  <rect x="624" y="200" width="128" height="66" rx="8" fill="#eaf7ee" stroke="#2e9d57"/>
+  <text x="688" y="225" font-size="11.5" font-weight="700" text-anchor="middle">Panel + Alert</text>
+  <text x="688" y="242" font-size="9.5" text-anchor="middle">floating panel,</text>
+  <text x="688" y="256" font-size="9.5" text-anchor="middle">desktop notification</text>
+
+  <!-- arrows top row -->
+  <line x1="132" y1="63" x2="160" y2="63" stroke="#3a4357" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="286" y1="63" x2="314" y2="63" stroke="#3a4357" stroke-width="1.5" marker-end="url(#ar)"/>
+  <text x="300" y="120" font-size="9" fill="#3a4357" text-anchor="middle">webhook POST</text>
+  <line x1="300" y1="70" x2="300" y2="110" stroke="#c0c6d2" stroke-dasharray="2 2"/>
+  <line x1="440" y1="63" x2="468" y2="63" stroke="#1f5fbf" stroke-width="2" marker-end="url(#arB)"/>
+  <text x="455" y="120" font-size="9" fill="#1f5fbf" text-anchor="middle">trigger</text>
+  <line x1="455" y1="70" x2="455" y2="110" stroke="#c0c6d2" stroke-dasharray="2 2"/>
+  <line x1="594" y1="63" x2="622" y2="63" stroke="#1f5fbf" stroke-width="2" marker-end="url(#arB)"/>
+  <text x="600" y="120" font-size="9" fill="#1f5fbf" text-anchor="end">WebSocket push</text>
+  <line x1="600" y1="70" x2="600" y2="110" stroke="#c0c6d2" stroke-dasharray="2 2"/>
+
+  <!-- webhook to S3 -->
+  <line x1="378" y1="108" x2="378" y2="198" stroke="#b58900" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="372" y="150" font-size="9" fill="#7a5c00" text-anchor="end">conditional PUT</text>
+  <text x="372" y="162" font-size="9" fill="#7a5c00" text-anchor="end">(If-Match ETag)</text>
+
+  <!-- S3 to /api/tweets -->
+  <line x1="440" y1="233" x2="468" y2="233" stroke="#3a4357" stroke-width="1.5" marker-end="url(#ar)"/>
+  <text x="455" y="225" font-size="9" fill="#3a4357" text-anchor="middle">read</text>
+
+  <!-- extension to /api/tweets (catch-up) -->
+  <line x1="640" y1="98" x2="580" y2="198" stroke="#3a4357" stroke-width="1.5" stroke-dasharray="5 3" marker-start="url(#ar)" marker-end="url(#ar)"/>
+  <text x="566" y="150" font-size="9" fill="#3a4357" text-anchor="end">catch-up GET</text>
+  <text x="566" y="162" font-size="9" fill="#3a4357" text-anchor="end">If-None-Match</text>
+
+  <!-- extension to panel -->
+  <line x1="688" y1="96" x2="688" y2="198" stroke="#2e9d57" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="694" y="150" font-size="9" fill="#1f7a41">port msg</text>
+
+  <!-- legend -->
+  <line x1="20" y1="310" x2="48" y2="310" stroke="#1f5fbf" stroke-width="2" marker-end="url(#arB)"/>
+  <text x="54" y="313" font-size="9" fill="#3a4357">hot path (real time, &lt;500 ms)</text>
+  <line x1="220" y1="310" x2="248" y2="310" stroke="#3a4357" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ar)"/>
+  <text x="254" y="313" font-size="9" fill="#3a4357">catch-up / fallback only (one request on connect)</text>
+</svg>
+<figcaption>Figure 1. End-to-end flow. Blue arrows = the real-time hot path. Dashed = the catch-up read.</figcaption>
+</figure>
+
+<h3>The flow in 6 steps</h3>
+<ol>
+  <li><b>Source.</b> A monitored account posts on X. TwitterAPI.io's User Stream sees it.</li>
+  <li><b>Webhook.</b> TwitterAPI.io sends an HTTP POST to <code>/api/twitter-webhook?key=SECRET</code>. Vercel runs the function.</li>
+  <li><b>Clean.</b> The secret is checked with <code>timingSafeEqual</code>, then <code>normalizePayload()</code> turns the payload into a standard tweet object.</li>
+  <li><b>Save.</b> <code>addTweets()</code> merges the new tweets into <code>tweets.json</code> in S3: drop duplicates by ID, drop yesterday's posts, newest first, cap at 1,000. It writes with a conditional PUT.</li>
+  <li><b>Push.</b> <code>pusher.trigger('x-monitor', 'new-tweets', …)</code>, at most 2 tweets per event to stay under Pusher's 10 KB message limit.</li>
+  <li><b>Show.</b> The extension's service worker gets the WebSocket message, skips IDs it has already seen, updates the panel and badge, and fires a desktop notification.</li>
+</ol>
+
+<div class="box hi"><span class="tag">Samjho</span>
+Ek line mein: <b>"Data aata hai webhook se, rehta hai S3 mein, jaata hai Pusher se."</b> S3 sirf "memory" hai (record rakhne ke liye, aur jab extension naya khule toh purane tweets dikhane ke liye). Real-time delivery Pusher karta hai. <code>/api/tweets</code> sirf backup hai: extension connect hote hi ek baar "catch-up" call karta hai, ya Pusher band ho toh fallback polling.
+</div>
+
+<h3>Supporting pieces (mention if asked)</h3>
+<ul>
+  <li><b>Market-hours gate</b>: storing and polling run only 9:00–15:30 IST, with 5 minutes of grace to 15:35. Old posts are hidden at 08:55 every morning. That boundary is <i>computed</i> (<code>retentionCutoff()</code>), not a cron job, so server and extension agree to the second.</li>
+  <li><b>Manual ON mode</b>: a 5-minute override for after hours, which then falls back to Auto by itself.</li>
+  <li><b>WebSocket bridge</b> (<code>scripts/stream-listener.mjs</code>): another way in. It listens to TwitterAPI.io's WebSocket and forwards to the same webhook, so both sources share one pipeline.</li>
+  <li><b>Cloudflare edge shield</b> (optional): a Worker in front of the webhook answers off-hours deliveries at the edge, so Vercel is never invoked for them.</li>
+</ul>
+</section>
+
+<!-- ═════════════════════════ 3. INGESTION PIPELINE ═════════════════════════ -->
+<section class="page-break">
+<h2>3. What is an ingestion pipeline?</h2>
+
+<div class="box hi"><span class="tag">Samjho</span>
+"Ingest" matlab <b>andar lena</b>. Ingestion pipeline matlab bahar se aane wale raw data ko andar lena, saaf karna, aur kahin store karna, step-by-step, ek assembly line ki tarah.<br><br>
+<b>Analogy:</b> Ek post office socho. Har courier company ka parcel alag shape aur label mein aata hai (raw data). Counter pe staff check karta hai ki parcel genuine hai (auth), sab pe ek standard label lagata hai (normalize), same parcel do baar aaya toh ek hata deta hai (de-dupe), shelf pe rakhta hai (store), aur customer ko SMS bhejta hai "aapka parcel aa gaya" (push notification).
+</div>
+
+<p><b>"Webhook" ingestion</b> means the provider <i>calls you</i> when there's new data. You don't keep asking the provider. That's "push", the opposite of "pull" or "poll".</p>
+
+<table>
+  <tr><th>Stage</th><th>What happens in X Monitor</th><th>Code</th></tr>
+  <tr><td>1. Receive</td><td>TwitterAPI.io sends a POST with one or more tweets</td><td><code>POST /api/twitter-webhook</code></td></tr>
+  <tr><td>2. Authenticate</td><td>Secret in the URL (<code>?key=</code>) or <code>x-api-key</code> header, compared with <code>timingSafeEqual</code>. With no secret configured, every write is refused.</td><td><code>secretMatches()</code></td></tr>
+  <tr><td>3. Validate</td><td>Empty or non-JSON body = provider's validation ping → reply 200 and do nothing</td><td>route.js</td></tr>
+  <tr><td>4. Normalize</td><td>Any payload shape → one standard tweet object</td><td><code>normalizePayload()</code></td></tr>
+  <tr><td>5. De-dupe + store</td><td>Merge into S3 by tweet ID, conditional write</td><td><code>addTweets()</code> → <code>s3Update()</code></td></tr>
+  <tr><td>6. Fan-out</td><td>Publish to the Pusher channel</td><td><code>pusher.trigger()</code></td></tr>
+  <tr><td>7. Acknowledge</td><td>200 on success. 500 on a store failure, so the provider retries instead of dropping the batch.</td><td>route.js</td></tr>
+</table>
+
+<div class="box say"><span class="tag">Interview mein bolo</span>
+"Ingestion pipeline just means the path data takes from the outside world into my system. Mine is webhook-based: the tweet provider calls my endpoint, and I authenticate, validate, normalize, de-duplicate, store and broadcast, in that order. Each step is small and does one job, so it's easy to test and reason about."
+</div>
+
+<div class="box ex"><span class="tag">Example</span>
+At 10:42:05 AM, @NDTVProfit posts "Sensex jumps 600 points after RBI policy". At about 10:42:06 TwitterAPI.io POSTs it to my webhook. Within a few hundred milliseconds it's saved in S3 and pushed, and the trader sees a desktop notification: "NDTV Profit: Sensex jumps 600 points…"
+</div>
+</section>
+
+<!-- ═════════════════════════ 4. NORMALIZE / DEDUPE ═════════════════════════ -->
+<section class="page-break">
+<h2>4. Normalize and de-duplicate</h2>
+
+<h3>4a. Normalize: many shapes in, one shape out</h3>
+<div class="box hi"><span class="tag">Samjho</span>
+TwitterAPI.io har baar same format mein data nahi bhejta. Kabhi tweets <code>payload.tweets</code> mein aate hain, kabhi <code>payload.data</code> mein, kabhi ek single object. Username kabhi <code>user.screen_name</code> mein hota hai, kabhi <code>author.userName</code> mein. Normalize karna matlab: <b>sabko ek hi standard shape mein convert karna</b>, taaki extension ko sirf ek format samajhna pade. Jaise alag-alag languages ke documents ko ek common language mein translate karna.
+</div>
+
+<div class="two">
+<div>
+<p class="small"><b>Raw payload A</b> (one shape)</p>
+<pre>{ "tweets": [{
+    "id": "1849…",
+    "text": "RBI keeps repo rate at 6.5%",
+    "createdAt": "2026-10-21T04:30:12Z",
+    "author": { "userName": "NDTVProfit",
+                "name": "NDTV Profit" }
+}]}</pre>
+<p class="small"><b>Raw payload B</b> (another shape)</p>
+<pre>{ "data": {
+    "tweetId": "1849…",
+    "full_text": "RBI keeps repo rate at 6.5%",
+    "user_id": "420943164",
+    "favorite_count": 12
+}}</pre>
+</div>
+<div>
+<p class="small"><b>After <code>normalizeTweet()</code></b>, always this shape:</p>
+<pre>{
+  "id": "1849…",
+  "text": "RBI keeps repo rate at 6.5%",
+  "created_at": "2026-10-21T04:30:12Z",
+  "author": {
+    "username": "NDTVProfit",
+    "name": "NDTV Profit",
+    "profile_image_url": "…"
+  },
+  "media": [],
+  "metrics": { "likes": 12,
+               "retweets": 0, "replies": 0 },
+  "received_at": "2026-10-21T04:30:13.120Z"
+}</pre>
+</div>
+</div>
+
+<p><b>What normalization does in your code:</b></p>
+<ul>
+  <li><code>extractRawTweets()</code> unwraps the envelope (array, <code>.tweets</code>, <code>.data</code>, <code>.tweet</code>, or a single tweet).</li>
+  <li><code>resolveAuthor()</code> finds the author. The <b>numeric user ID</b> is the strongest signal, because handles can change and IDs don't. It falls back to the handle, and then to fuzzy matching on the <i>display name</i>.</li>
+  <li><code>extractMedia()</code> collects photos and videos from four different places a payload can keep them, de-duplicated by URL.</li>
+  <li>Adds <code>received_at</code>, the server time the tweet arrived. Useful for measuring latency.</li>
+</ul>
+
+<div class="box ex"><span class="tag">Example: a real bug you fixed (good story)</span>
+The first version of the fuzzy matcher searched the tweet <b>body</b> as well as the author's name. Any tweet that merely mentioned "ANI" or "Moneycontrol" got credited to that account. Example: a Yatin Mota tweet saying "as reported by Moneycontrol…" showed up as Moneycontrol. The fix: match on the display name only, and prefer the stable numeric user ID.
+</div>
+
+<h3>4b. De-duplicate: the same tweet must appear only once</h3>
+<div class="box hi"><span class="tag">Samjho</span>
+Duplicate kyun aate hain? (1) Webhook providers <b>retry</b> karte hain: agar humara server slow tha ya 500 diya, toh same tweet dobara bhejenge. (2) Do ingestion sources hain (webhook + WebSocket bridge), dono same tweet la sakte hain. (3) Extension ko same tweet Pusher se bhi milta hai aur catch-up GET se bhi. Har tweet ka ek unique <code>id</code> hota hai, toh hum ek <b>Set of IDs</b> rakhte hain: agar ID pehle se hai, skip.
+</div>
+
+<p><b>De-dupe happens at two layers</b> (defense in depth):</p>
+<pre>// Server: src/lib/store.mjs, merge()
+const ids = new Set(kept.map(t =&gt; t.id));
+const unique = incoming.filter(t =&gt; t.id &amp;&amp; !ids.has(t.id) &amp;&amp; !isExpired(t));
+const list = [...unique, ...kept].slice(0, MAX_TWEETS);   // newest first, cap 1000
+
+// Extension: background.js
+const newTweets = incoming.filter(t =&gt; !seenIds.has(t.id));   // notify only once</pre>
+
+<div class="box say"><span class="tag">Interview mein bolo</span>
+"Webhooks are at-least-once: the provider may send the same tweet twice when it retries. So I made the write <b>idempotent</b>. The merge uses a Set of tweet IDs, and sending the same tweet twice leaves the store unchanged. If nothing changed I skip the S3 write entirely. The extension keeps its own <code>seenIds</code> set too, so a tweet that arrives over both Pusher and the catch-up request triggers only one notification."
+</div>
+
+<div class="box ex"><span class="tag">Example</span>
+The webhook saves tweet <code>1849…</code> but takes too long to reply, so TwitterAPI.io retries. The second delivery reaches <code>merge()</code>, finds the ID already in the Set, and gets <code>added = 0, changed = false</code>. No S3 write happens, and the user still sees one notification.
+</div>
+</section>
+
+<!-- ═════════════════════════ 5. 1000+ / 20+ ═════════════════════════ -->
+<section>
+<h2>5. "1,000+ tweets a day from 20+ channels"</h2>
+<div class="box hi"><span class="tag">Samjho</span>
+"Channel" yahan matlab <b>ek monitored X account</b> (news handle ya analyst), jaise @moneycontrolcom, @NDTVProfit, @LiveLawIndia, CNBC-TV18, ET NOW, Zee Business, Livemint, PTI, ANI, Bloomberg, aur analysts jaise Yatin Mota. News accounts market ke time bahut post karte hain: ek bada handle 6.5 ghante mein 100+ posts kar sakta hai. Toh 20 accounts × ~50 average = 1,000+ per day. Store ka cap bhi isi hisaab se <code>MAX_TWEETS = 1000</code> rakha hai ("comfortably a full market day").
+</div>
+<div class="box say"><span class="tag">Interview mein bolo</span>
+"By channels I mean the X accounts I monitor: Indian financial media like Moneycontrol, NDTV Profit and CNBC-TV18, plus a few market analysts. News handles post very often during market hours, so across 20-odd accounts that's over a thousand posts a day. I sized the store for that: it keeps up to 1,000 of today's posts and clears everything at 8:55 AM the next morning."
+</div>
+<div class="box warn"><span class="tag">Careful</span>
+Know your own numbers before the interview. The extension has display labels for about 19–20 accounts, but which accounts actually stream is set on the TwitterAPI.io plan. The plan is billed per account, and the README notes six accounts streaming as of Sep 2026. If you're asked "which 20?" or "is that live today?", answer honestly. For example: "The system is built for 20+ and was run with that many. The paid plan currently streams N accounts, and changing the set is a dashboard setting, not a code change." A calm, truthful answer beats a number you can't back up.
+</div>
+</section>
+
+<!-- ═════════════════════════ 6. WHY S3 ═════════════════════════ -->
+<section class="page-break">
+<h2>6. Why S3?</h2>
+
+<div class="box hi"><span class="tag">Samjho</span>
+Vercel serverless functions ki <b>apni koi permanent disk nahi hoti</b>. Har request ek naye ya alag container mein chal sakti hai, aur local file request khatam hote hi gayab ho sakti hai. Toh data ko kahin bahar rakhna padega. Humara data chhota hai: ek din ke ~1,000 tweets, ek JSON file, kuch sau KB. Iske liye poora database (Postgres/Mongo) chalana overkill hai. S3 sasta hai, kabhi down nahi hota (99.99% availability), koi server manage nahi karna padta, aur sabse important: <b>S3 mein ETag aur conditional requests built-in hain</b>, jinse caching (304) aur safe writes (If-Match) dono free mein mil jaate hain.
+</div>
+
+<table>
+  <tr><th>Option</th><th>Why not / why</th></tr>
+  <tr><td>Local file on Vercel</td><td>No. Serverless filesystem is temporary, and each function instance has its own copy.</td></tr>
+  <tr><td>Postgres / MongoDB</td><td>Works, but it's a server to run, a connection pool to manage from serverless, and extra cost, all for one small list.</td></tr>
+  <tr><td>Redis</td><td>Fast, but another paid service, and you'd still want something durable behind it.</td></tr>
+  <tr><td>DynamoDB</td><td>A good choice if this grows (one row per tweet, conditional writes too). More setup for v1.</td></tr>
+  <tr><td><b>S3 (chosen)</b></td><td>Cheap, durable (11 nines), serverless, strong read-after-write consistency, <b>native ETag + If-Match / If-None-Match</b>. One object = the whole day's feed.</td></tr>
+</table>
+
+<div class="box say"><span class="tag">Interview mein bolo</span>
+"My backend is serverless on Vercel, so there's no local disk that survives between requests. I needed an external store. The data is small, a single day's feed of around a thousand tweets, so I keep it as one JSON object in S3. S3 is cheap and durable and needs no server. It also supports ETags and conditional requests, which gave me two things for free: 304 caching on reads and safe concurrent writes with If-Match. If the product grew, say per-user feeds or months of history, I'd move to DynamoDB with one item per tweet."
+</div>
+
+<div class="box ex"><span class="tag">Extra detail that impresses</span>
+Reads sit behind a <b>1-second in-memory cache</b> and use a <b>conditional GET</b> (<code>IfNoneMatch: lastEtag</code>). If several requests hit the same warm function within a second, S3 is called once. And when S3 hasn't changed, it answers 304 with no body, so even the S3 call is cheap.
+</div>
+</section>
+
+<!-- ═════════════════════════ 7. OPTIMISTIC CONCURRENCY ═════════════════════════ -->
+<section class="page-break">
+<h2>7. Optimistic-concurrency writes</h2>
+
+<div class="box hi"><span class="tag">Samjho</span>
+<b>Problem: "lost update".</b> S3 mein "append" nahi hota. File update karne ke liye poori file padho → usme naya tweet jodo → poori file wapas likho. Ab socho do webhooks <i>ek saath</i> aaye: dono ne same purani file padhi, dono ne apna-apna tweet joda, dono ne likha. Jo baad mein likhega, woh pehle wale ka tweet <b>mita dega</b>. Tweet gaya!<br><br>
+<b>Solution: optimistic concurrency.</b> "Optimistic" matlab hum maan ke chalte hain ki clash kam hi hoga, isliye pehle se lock nahi lagate. Bas likhte waqt check karte hain: "file abhi bhi wahi version hai na jo maine padha tha?" S3 har version ko ek <b>ETag</b> (fingerprint) deta hai. Hum likhte hain <code>If-Match: &lt;etag&gt;</code>. Agar beech mein kisi aur ne likh diya, toh ETag badal gaya hoga, aur S3 bolega <b>412 Precondition Failed</b>. Tab hum file dobara padhte hain (ab usme dusre ka tweet bhi hai), apna tweet jodte hain, aur phir try karte hain.<br><br>
+<b>Analogy:</b> Google Docs / Wikipedia edit conflict: "Is page ko aapke edit shuru karne ke baad kisi ne badal diya hai, please refresh karke dobara karo."
+</div>
+
+<figure>
+<svg viewBox="0 0 700 330" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3a4357"/></marker>
+    <marker id="a2r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c8443a"/></marker>
+    <marker id="a2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2e9d57"/></marker>
+  </defs>
+  <rect x="40" y="10" width="140" height="34" rx="6" fill="#e9f1ff" stroke="#1f5fbf"/>
+  <text x="110" y="32" font-size="12" font-weight="700" text-anchor="middle">Webhook A (tweet X)</text>
+  <rect x="280" y="10" width="140" height="34" rx="6" fill="#fff7e0" stroke="#b58900"/>
+  <text x="350" y="32" font-size="12" font-weight="700" text-anchor="middle">S3 tweets.json</text>
+  <rect x="520" y="10" width="140" height="34" rx="6" fill="#e9f1ff" stroke="#1f5fbf"/>
+  <text x="590" y="32" font-size="12" font-weight="700" text-anchor="middle">Webhook B (tweet Y)</text>
+  <line x1="110" y1="44" x2="110" y2="320" stroke="#c0c6d2" stroke-dasharray="4 3"/>
+  <line x1="350" y1="44" x2="350" y2="320" stroke="#c0c6d2" stroke-dasharray="4 3"/>
+  <line x1="590" y1="44" x2="590" y2="320" stroke="#c0c6d2" stroke-dasharray="4 3"/>
+
+  <line x1="110" y1="70" x2="346" y2="70" stroke="#3a4357" stroke-width="1.4" marker-end="url(#a2)"/>
+  <text x="228" y="64" font-size="10" text-anchor="middle">① GET → data, ETag "v1"</text>
+  <line x1="590" y1="100" x2="354" y2="100" stroke="#3a4357" stroke-width="1.4" marker-end="url(#a2)"/>
+  <text x="472" y="94" font-size="10" text-anchor="middle">② GET → data, ETag "v1"</text>
+
+  <line x1="110" y1="140" x2="346" y2="140" stroke="#2e9d57" stroke-width="1.8" marker-end="url(#a2g)"/>
+  <text x="228" y="134" font-size="10" text-anchor="middle">③ PUT [X + old], If-Match "v1"</text>
+  <text x="358" y="144" font-size="10" fill="#1f7a41">✓ 200, now "v2"</text>
+
+  <line x1="590" y1="180" x2="354" y2="180" stroke="#c8443a" stroke-width="1.8" marker-end="url(#a2r)"/>
+  <text x="472" y="174" font-size="10" text-anchor="middle">④ PUT [Y + old], If-Match "v1"</text>
+  <text x="342" y="198" font-size="10" fill="#c8443a" text-anchor="end">✗ 412 Precondition Failed</text>
+
+  <text x="600" y="218" font-size="10" fill="#5b6475">wait 40–100 ms (jitter)</text>
+  <line x1="590" y1="240" x2="354" y2="240" stroke="#3a4357" stroke-width="1.4" marker-end="url(#a2)"/>
+  <text x="472" y="234" font-size="10" text-anchor="middle">⑤ re-GET → [X + old], ETag "v2"</text>
+  <line x1="590" y1="285" x2="354" y2="285" stroke="#2e9d57" stroke-width="1.8" marker-end="url(#a2g)"/>
+  <text x="472" y="279" font-size="10" text-anchor="middle">⑥ PUT [Y + X + old], If-Match "v2"</text>
+  <text x="342" y="304" font-size="10" fill="#1f7a41" text-anchor="end">✓ 200, both tweets saved</text>
+</svg>
+<figcaption>Figure 2. Two webhooks race. Without If-Match, step ④ would silently delete tweet X.</figcaption>
+</figure>
+
+<pre>// src/lib/store.mjs, s3Update() (simplified)
+for (let attempt = 1; attempt &lt;= 6; attempt++) {
+  const { tweets: current, etag } = await s3Fetch();          // read + version
+  const { list, changed } = transform(current);               // merge / de-dupe
+  if (!changed) return current;                               // nothing new → skip write
+  try {
+    await s3.send(new PutObjectCommand({ ..., Body: JSON.stringify(list),
+      ...(etag ? { IfMatch: etag } : { IfNoneMatch: '*' }) })); // write only if unchanged
+    return list;
+  } catch (err) {
+    if (!isConflict(err)) throw err;                          // real error → 500
+    await sleep(40 * attempt + Math.random() * 60);           // lost the race → retry
+  }
+}</pre>
+
+<table>
+  <tr><th></th><th>Optimistic (what you used)</th><th>Pessimistic</th></tr>
+  <tr><td>Idea</td><td>No lock. Check the version at write time, retry on conflict.</td><td>Take a lock first, then no one else can write.</td></tr>
+  <tr><td>Good when</td><td>Conflicts are rare (a few webhooks a minute)</td><td>Conflicts are frequent and retries are expensive</td></tr>
+  <tr><td>Cost</td><td>Occasional retry</td><td>Lock service, deadlocks, lock timeouts</td></tr>
+  <tr><td>S3 support</td><td>Yes: <code>If-Match</code> / <code>If-None-Match: *</code> on PUT</td><td>No native locks</td></tr>
+</table>
+
+<div class="box say"><span class="tag">Interview mein bolo</span>
+"S3 objects can't be appended to, so every write is read-modify-write. If two webhook calls overlap, the later write would silently erase the earlier one. That's the classic lost-update problem. I solved it with optimistic concurrency. I read the object along with its ETag, which is its version fingerprint, and write with <code>If-Match</code> set to that ETag. If anyone wrote in between, S3 rejects my write with 412. Then I re-read, merge again, and retry, up to six times, with a small random delay so the two writers don't collide again. I chose optimistic over locking because conflicts are rare here, and S3 has no locks anyway. For the very first write I use <code>If-None-Match: *</code>, which means 'create only if it doesn't exist'."
+</div>
+
+<div class="box ex"><span class="tag">Why random delay ("jitter")?</span>
+If both losers waited exactly 50 ms, they'd retry at the same instant and clash again. A random 40–100 ms wait spreads them out, the same way two people in a corridor stop dancing left-right once one of them pauses.
+</div>
+</section>
+
+<!-- ═════════════════════════ 8. UNDER 500 MS ═════════════════════════ -->
+<section class="page-break">
+<h2>8. "Under 500 ms": how it's calculated</h2>
+
+<div class="box hi"><span class="tag">Samjho</span>
+500 ms ka matlab: <b>jab tweet humare webhook pe pahuncha, tab se lekar jab tak extension ko mil gaya</b>, total time aadhe second se kam. Is time mein X → TwitterAPI.io wala hissa shaamil <b>nahi</b> hai, kyunki woh humare control mein nahi hai. Yeh clearly bolna, interviewer ko achha lagega ki aap apna measurement boundary jaante ho. Har step ka time roughly:
+</div>
+
+<figure>
+<svg viewBox="0 0 700 150" xmlns="http://www.w3.org/2000/svg">
+  <text x="10" y="18" font-size="11" font-weight="700">Hot path: webhook arrives → extension shows the alert (typical figures)</text>
+  <rect x="10"  y="32" width="16"  height="34" fill="#9bb7e6"/>
+  <rect x="26"  y="32" width="180" height="34" fill="#f2cf6b"/>
+  <rect x="206" y="32" width="96"  height="34" fill="#7fc79a"/>
+  <rect x="302" y="32" width="84"  height="34" fill="#b9a3e3"/>
+  <rect x="386" y="32" width="20"  height="34" fill="#e8a0a0"/>
+  <line x1="510" y1="26" x2="510" y2="74" stroke="#c8443a" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="516" y="40" font-size="10" fill="#c8443a">500 ms budget</text>
+  <text x="414" y="54" font-size="10" fill="#3a4357">≈ 200–400 ms total</text>
+  <!-- labels -->
+  <rect x="10" y="86" width="10" height="10" fill="#9bb7e6"/><text x="24" y="95" font-size="9.5">auth + normalize ~5 ms</text>
+  <rect x="150" y="86" width="10" height="10" fill="#f2cf6b"/><text x="164" y="95" font-size="9.5">S3 GET + conditional PUT ~100–200 ms</text>
+  <rect x="360" y="86" width="10" height="10" fill="#7fc79a"/><text x="374" y="95" font-size="9.5">pusher.trigger() HTTP ~50–100 ms</text>
+  <rect x="10" y="108" width="10" height="10" fill="#b9a3e3"/><text x="24" y="117" font-size="9.5">Pusher → extension WebSocket ~40–100 ms</text>
+  <rect x="260" y="108" width="10" height="10" fill="#e8a0a0"/><text x="274" y="117" font-size="9.5">de-dupe + render + notification ~10–20 ms</text>
+  <text x="10" y="140" font-size="9" fill="#5b6475">Scale: 1 px ≈ 1 ms (illustrative). Assumes the Vercel function runs in Mumbai (bom1), next to S3 (ap-south-1) and Pusher (ap2).</text>
+</svg>
+<figcaption>Figure 3. Latency budget. The S3 write is the biggest piece.</figcaption>
+</figure>
+
+<h3>How to measure it (and how to describe it)</h3>
+<ol>
+  <li><b>Timestamps at both ends.</b> The server stamps every tweet with <code>received_at</code> in <code>normalizeTweet()</code>. When the extension gets the Pusher message, compute <code>Date.now() - Date.parse(tweet.received_at)</code> and log it. Both machines sync their clocks over NTP, so the skew is a few ms.</li>
+  <li><b>Logs.</b> Compare the Vercel function log time ("Stored N tweets…", "Pushed N tweets…") with the extension console line "⚡ Instant delivery…".</li>
+  <li><b>Pusher Debug Console</b> shows when each event was published, and Vercel shows function duration. Add the two.</li>
+  <li>Take <b>many samples</b> (for example a full market day) and quote the <b>p95</b>, not one lucky run. "p95 under 500 ms" means 95% of tweets arrived faster than that.</li>
+</ol>
+
+<div class="box say"><span class="tag">Interview mein bolo</span>
+"I measured from the moment the webhook hits my server to the moment the extension receives the tweet. The server stamps each tweet with a <code>received_at</code> time, and the extension subtracts that from its own clock when the Pusher message arrives. Most of the time is the S3 write, roughly 100 to 200 ms. Then the Pusher publish, and the WebSocket hop to the browser. The function, the S3 bucket and the Pusher cluster are in the same region, so end to end it's typically a few hundred milliseconds and stays under 500 ms. The X-to-TwitterAPI.io hop is outside my control, so I don't count it."
+</div>
+
+<div class="box warn"><span class="tag">Careful: likely follow-up</span>
+<b>"How would you make it faster?"</b> Right now the push happens <i>after</i> the S3 write. Since S3 is the slowest step, you could publish to Pusher <b>first, or in parallel</b> (<code>Promise.all</code>) and persist afterwards. That cuts ~100–200 ms. The trade-off: a user might see a tweet that then fails to save. It's still in their extension, and the provider retries. Also, if you haven't actually logged these numbers yet, add the one-line latency log before the interview, so "how did you measure?" has a real answer.
+</div>
+
+<div class="box warn"><span class="tag">Check before the interview: function region</span>
+Your <code>vercel.json</code> doesn't set a region, and Vercel runs functions in <b>US East (iad1)</b> by default. If that's where yours run, every S3 call to Mumbai is a ~200 ms round trip, and GET + PUT alone could take ~400 ms. Open Vercel → Project → Settings → Functions → Region. If it isn't Mumbai (<code>bom1</code>), set it, or add <code>"regions": ["bom1"]</code> to <code>vercel.json</code>, and measure again. "I moved the function next to the data and latency dropped" is also a great thing to say in the interview.
+</div>
+</section>
+
+<!-- ═════════════════════════ 9. EVENT-DRIVEN STREAMING ═════════════════════════ -->
+<section class="page-break">
+<h2>9. Event-driven streaming: Pusher WebSockets + ETag/304</h2>
+
+<div class="box hi"><span class="tag">Samjho</span>
+<b>Polling</b> = car mein baitha bachcha har 2 second poochta hai "pahunch gaye? pahunch gaye?". 99% baar jawab "nahi" hota hai, phir bhi har baar poochne mein energy lagti hai. Humare case mein har "poochna" = ek Vercel function call + poora feed download.<br>
+<b>Event-driven / push</b> = papa bolte hain "jab pahunchenge, main bata dunga". Kuch hua (event) tabhi message aata hai, warna khamoshi. Isko ek <b>WebSocket</b> se karte hain: browser aur server ke beech ek open phone line jo khuli rehti hai, aur server jab chahe usme message bhej sakta hai.<br>
+<b>Pusher kyun?</b> Vercel serverless functions zyada der zinda nahi rehte, toh hazaron long-lived WebSocket connections hold nahi kar sakte. Pusher ek managed service hai jo yeh connections sambhalta hai. Humara server bas ek HTTP call karta hai (<code>trigger</code>), aur Pusher sab connected browsers tak pahuncha deta hai (fan-out).
+</div>
+
+<figure>
+<svg viewBox="0 0 700 220" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3a4357"/></marker></defs>
+  <!-- BEFORE -->
+  <text x="170" y="16" font-size="12" font-weight="700" text-anchor="middle" fill="#c8443a">BEFORE: polling every 2 s</text>
+  <rect x="20" y="30" width="110" height="44" rx="6" fill="#eaf7ee" stroke="#2e9d57"/><text x="75" y="57" font-size="11" text-anchor="middle">Extension</text>
+  <rect x="220" y="30" width="110" height="44" rx="6" fill="#e9f1ff" stroke="#1f5fbf"/><text x="275" y="51" font-size="11" text-anchor="middle">/api/tweets</text><text x="275" y="65" font-size="9" text-anchor="middle">(function runs)</text>
+  <g stroke="#3a4357" stroke-width="1.2">
+    <line x1="130" y1="90" x2="218" y2="90" marker-end="url(#a3)"/>
+    <line x1="130" y1="108" x2="218" y2="108" marker-end="url(#a3)"/>
+    <line x1="130" y1="126" x2="218" y2="126" marker-end="url(#a3)"/>
+    <line x1="130" y1="144" x2="218" y2="144" marker-end="url(#a3)"/>
+  </g>
+  <text x="175" y="166" font-size="9.5" text-anchor="middle">GET, GET, GET … ~43,000/day</text>
+  <text x="175" y="182" font-size="9.5" text-anchor="middle" fill="#c8443a">each returns the WHOLE feed (~250 KB)</text>
+  <text x="175" y="198" font-size="9.5" text-anchor="middle" fill="#c8443a">even when nothing changed</text>
+
+  <line x1="350" y1="20" x2="350" y2="210" stroke="#d9dee7" stroke-width="1.5"/>
+
+  <!-- AFTER -->
+  <text x="525" y="16" font-size="12" font-weight="700" text-anchor="middle" fill="#2e9d57">AFTER: push on event + one catch-up</text>
+  <rect x="370" y="30" width="100" height="44" rx="6" fill="#e9f1ff" stroke="#1f5fbf"/><text x="420" y="51" font-size="11" text-anchor="middle">Webhook</text><text x="420" y="65" font-size="9" text-anchor="middle">(new tweet)</text>
+  <rect x="490" y="30" width="80" height="44" rx="6" fill="#f4f6fa" stroke="#3a4357"/><text x="530" y="57" font-size="11" text-anchor="middle">Pusher</text>
+  <rect x="590" y="30" width="100" height="44" rx="6" fill="#eaf7ee" stroke="#2e9d57"/><text x="640" y="57" font-size="11" text-anchor="middle">Extension</text>
+  <line x1="470" y1="52" x2="488" y2="52" stroke="#1f5fbf" stroke-width="1.6" marker-end="url(#a3)"/>
+  <line x1="570" y1="52" x2="588" y2="52" stroke="#1f5fbf" stroke-width="1.6" marker-end="url(#a3)"/>
+  <text x="530" y="96" font-size="9.5" text-anchor="middle">only when a tweet actually arrives</text>
+  <text x="530" y="110" font-size="9.5" text-anchor="middle">~1 KB per push</text>
+  <rect x="440" y="128" width="180" height="70" rx="6" fill="#fafbfc" stroke="#d9dee7"/>
+  <text x="530" y="146" font-size="9.5" text-anchor="middle" font-weight="700">On connect: 1 catch-up GET</text>
+  <text x="530" y="161" font-size="9" text-anchor="middle">If-None-Match: "hash"</text>
+  <text x="530" y="175" font-size="9" text-anchor="middle">unchanged → 304, empty body</text>
+  <text x="530" y="189" font-size="9" text-anchor="middle">Pusher down → poll every 10 s</text>
+</svg>
+<figcaption>Figure 4. Pull vs push.</figcaption>
+</figure>
+
+<h3>ETag / 304: "only send it if it changed"</h3>
+<div class="box hi"><span class="tag">Samjho</span>
+ETag = data ka <b>fingerprint</b>. Server pehli baar poora feed bhejta hai, saath mein bolta hai "iska fingerprint <code>"123"</code> hai". Agli baar browser poochta hai "mere paas <code>"123"</code> wala hai, kuch badla?". Agar nahi badla, server bas bolta hai <b>304 Not Modified</b>, bina body ke. Jaise teacher se poochna "sir, notes update hue?" — "nahi" bolna poore notes dobara photocopy karne se sasta hai.
+</div>
+
+<pre>→ GET /api/tweets?force=1                      ← 200 OK   ETag: "2891734412"
+                                                  body: { tweets: [...50], feedHash: "2891734412" }   (~30 KB)
+
+→ GET /api/tweets?force=1                      ← 304 Not Modified   ETag: "2891734412"
+  If-None-Match: "2891734412"                      body: (empty, 0 bytes)</pre>
+
+<p><b>How the ETag is computed:</b> a DJB2 hash of the IDs of the newest 20 tweets (<code>feedHash()</code>). It's cheap, it's the same input every time, and it changes whenever a new tweet arrives <i>or</i> an old one expires. Hashing the IDs is enough, because a tweet's content never changes once posted. You don't need to hash the full body.</p>
+
+<div class="box say"><span class="tag">Interview mein bolo</span>
+"I moved from polling to an event-driven design. Before, the extension asked the server every couple of seconds, got the whole feed each time, and almost every answer was 'nothing new'. Now the webhook publishes an event to Pusher only when a tweet arrives. Pusher keeps a WebSocket open to each extension and fans the message out. I used Pusher because serverless functions can't hold long-lived connections. For the cases push doesn't cover, I kept one HTTP endpoint with ETag caching. That covers the first load, reconnecting after a dropped connection, and Pusher being unavailable. The client sends the last ETag in <code>If-None-Match</code>, and if nothing changed the server replies 304 with an empty body."
+</div>
+
+<div class="box ex"><span class="tag">Why keep the catch-up GET at all?</span>
+Pusher is fire-and-forget and doesn't replay missed messages. Say the laptop sleeps from 11:00 to 11:20 and three tweets come in. Pusher won't resend them. When the extension reconnects, it makes one catch-up GET and gets those three tweets. <code>seenIds</code> makes sure nothing is notified twice.
+</div>
+</section>
+
+<!-- ═════════════════════════ 10. NUMBERS ═════════════════════════ -->
+<section class="page-break">
+<h2>10. The numbers: 10 GB → ~1 MB, and 6,500+ invocations</h2>
+
+<div class="box hi"><span class="tag">Samjho</span>
+Interviewer zaroor poochega "yeh number kaise nikala?". Formula yaad rakho, aur apne Vercel dashboard (Usage → Fast Data Transfer, Function Invocations) ke real before/after numbers se match karke jaana. Neeche ka calculation ek <b>worked example</b> hai; apne actual measured numbers daal ke practise karo.
+</div>
+
+<h3>Bandwidth (outbound data per day)</h3>
+<p><b>Formula:</b> bandwidth/day = requests per day × bytes per response</p>
+<table>
+  <tr><th></th><th>Before (v1 polling)</th><th>After (push + 304)</th></tr>
+  <tr><td>How data moved</td><td>Extension polled every 2 s and got the <b>whole</b> feed every time</td><td>Pusher sends only new tweets. One catch-up GET on connect. Unchanged GETs = 304.</td></tr>
+  <tr><td>Requests/day</td><td>24 h × 3,600 / 2 s = <b>43,200</b></td><td>~1 catch-up per connect (plus 304s)</td></tr>
+  <tr><td>Size per response</td><td>Feed of hundreds of tweets × ~600 B ≈ <b>~250 KB</b></td><td>~1 KB per tweet pushed. A 304 has no body.</td></tr>
+  <tr><td>Per day</td><td>43,200 × 250 KB ≈ <b>10.8 GB</b></td><td>1,000 tweets × ~1 KB ≈ <b>~1 MB</b></td></tr>
+</table>
+<p>Reduction: (10.8 GB − 1 MB) / 10.8 GB ≈ <b>99.99%</b>, which is why the resume says "99%+".</p>
+<p><b>What drove it down, step by step</b> (good to tell as a story):</p>
+<ol>
+  <li><b>ETag/304</b>: an unchanged poll costs headers only, not the feed.</li>
+  <li><b>FEED_LIMIT = 50</b>: the panel shows 5 posts, so the API sends the newest 50, not up to 1,000. A changed feed costs a few KB, not hundreds.</li>
+  <li><b>Market-hours gate</b>: zero requests outside 9:00–15:30 IST.</li>
+  <li><b>Pusher</b>: polling stops entirely while the socket is up. Only the tweets themselves cross the wire.</li>
+</ol>
+
+<h3>Serverless invocations eliminated</h3>
+<p><b>Formula:</b> invocations/day = active seconds ÷ poll interval (per client)</p>
+<div class="box ex"><span class="tag">Worked example: plug in your real interval</span>
+<ul>
+<li>Market window 9:00–15:30 = 6.5 h = 23,400 s</li>
+<li>Polling every 1.5 s → 23,400 / 1.5 = <b>15,600</b> calls/day for one extension</li>
+<li>Polling every 3.5 s → about <b>6,700</b> calls/day</li>
+<li>Polling every 10 s (your fallback) → 2,340 per client, × 3 browsers ≈ <b>7,000</b></li>
+<li>After Pusher: ~1 catch-up per connect → <b>a handful</b> per day</li>
+</ul>
+"6,500+" is a safe, conservative figure for these setups. Use the one that matches what you ran and what your Vercel invocation graph shows.
+</div>
+
+<div class="box warn"><span class="tag">Careful: the key insight</span>
+A 304 saves <b>bandwidth</b> but <b>not invocations</b>. The function still runs to compare ETags. That's why ETag alone wasn't enough and you added push. Saying this clearly shows you understand the difference:<br>
+"ETag fixed the bytes. Pusher fixed the number of calls."
+</div>
+
+<div class="box say"><span class="tag">Interview mein bolo</span>
+"The original client polled every two seconds and downloaded the full feed each time. That's about 43,000 requests a day at a couple of hundred KB each, so over 10 GB a day, almost all of it repeated data. I fixed it in layers. ETags made unchanged responses empty 304s. I capped the response at the newest 50 tweets. I stopped polling outside market hours. Finally I moved to Pusher, so the extension makes one catch-up request when it connects instead of polling. Now only the new tweets themselves cross the network, about a kilobyte each, so around 1 MB a day. One subtle point: 304s save bandwidth, but each one is still a function invocation. Push is what removed the thousands of redundant invocations."
+</div>
+</section>
+
+<!-- ═════════════════════════ 11. MV3 ═════════════════════════ -->
+<section class="page-break">
+<h2>11. Chrome Extension MV3 details</h2>
+<div class="box hi"><span class="tag">Samjho</span>
+MV3 (Manifest Version 3) Chrome extensions ka naya standard hai. Sabse badi baat: background script ab ek <b>service worker</b> hai, jo Chrome ~30 second idle hone pe <b>band kar deta hai</b>. Toh normal <code>setInterval</code> pe bharosa nahi kar sakte, aur memory ka data bhi chala jaata hai. Isliye: state <code>chrome.storage</code> mein save karte hain, exact time pe uthne ke liye <code>chrome.alarms</code> lagate hain, aur ek content script "keep-alive port" kholke rakhta hai taaki session ke beech worker na mare.
+</div>
+<table>
+  <tr><th>MV3 constraint</th><th>How you handled it</th></tr>
+  <tr><td>Service worker can be killed any time</td><td>Persist mode, ON-deadline, cached tweets and <code>seenIds</code> in <code>chrome.storage.local</code>. Reload on start.</td></tr>
+  <tr><td>Timers don't survive the worker sleeping</td><td><code>chrome.alarms</code> for the exact next 8:55 / 9:00 / 15:30 / ON-expiry, plus a 30 s heartbeat</td></tr>
+  <tr><td>Long WebSocket in a worker</td><td>Reconnect after 5 s on close, fall back to polling while disconnected, and a content-script port keeps the worker alive</td></tr>
+  <tr><td>Permissions are strict</td><td><code>host_permissions</code> only for the backend and <code>*.pusher.com</code> (https + wss). <code>storage</code>, <code>notifications</code>, <code>alarms</code>, <code>windows</code>.</td></tr>
+  <tr><td>Avoid duplicate poll loops</td><td>A "generation counter": a stale tick from an old loop sees an old generation number and exits</td></tr>
+</table>
+<div class="box say"><span class="tag">Interview mein bolo</span>
+"In MV3 the background script is a service worker that Chrome can stop when it's idle, so I couldn't treat it like a long-running process. All state goes to <code>chrome.storage</code>, scheduling uses <code>chrome.alarms</code> set to the exact market-open and close times, and the WebSocket reconnects automatically. If Pusher is down, it falls back to slow polling."
+</div>
+</section>
+
+<!-- ═════════════════════════ 12. WHITEBOARD ═════════════════════════ -->
+<section>
+<h2>12. How to draw the architecture on a whiteboard</h2>
+<div class="box hi"><span class="tag">Samjho</span>
+Ek saath poora diagram mat banao. <b>Story ki tarah, ek-ek box add karo aur bolte jao.</b> Pehle simple version banao, phir problems batao, phir unka solution add karo. Isse interviewer ko aapki thinking dikhti hai.
+</div>
+<ol>
+  <li><b>Draw the two ends first:</b> "X accounts" on the left, "Trader's Chrome" on the right. Say: "The goal is to get a post from here to here in under a second."</li>
+  <li><b>Add TwitterAPI.io → Webhook (Vercel).</b> "I don't poll X. The provider calls my webhook."</li>
+  <li><b>Add the naive path:</b> webhook saves to S3, and the extension polls <code>/api/tweets</code> every 2 s. Say: "This is v1. It works, but…"</li>
+  <li><b>Point out problem 1:</b> two webhooks at once → lost update. <i>Write</i> "If-Match ETag → 412 → retry" on the arrow into S3.</li>
+  <li><b>Point out problem 2:</b> polling wastes bandwidth and calls. First fix: write "ETag / 304" on the poll arrow. "That saves bytes, but every poll still runs a function."</li>
+  <li><b>Add Pusher</b> between the webhook and the extension, in a different colour. "Push on event. Polling becomes one catch-up request on connect."</li>
+  <li><b>Add the small boxes:</b> "normalize + de-dupe" inside the webhook, "seenIds" inside the extension, a clock icon for the market-hours gate.</li>
+  <li><b>Finish with the numbers:</b> "&lt;500 ms delivery, ~10 GB → ~1 MB/day."</li>
+</ol>
+<p class="small">The finished board should look like Figure 1. Practise drawing it in under 3 minutes while talking.</p>
+</section>
+
+<!-- ═════════════════════════ 13. Q&A ═════════════════════════ -->
+<section class="page-break">
+<h2>13. Interview questions and answers</h2>
+
+<h3>Design and architecture</h3>
+<div class="qa"><div class="q">Q1. Why a webhook instead of polling the Twitter/X API yourself?</div>
+<div class="a">Polling X would mean asking every few seconds for 20 accounts. That's slow, expensive, and runs into rate limits. With a webhook, the provider tells me the moment something is posted, so latency is lower and I do work only when there's data.</div></div>
+
+<div class="qa"><div class="q">Q2. Why S3 and not a real database?</div>
+<div class="a">Serverless has no persistent disk. The data is one small daily list, and S3 is cheap, durable and needs no server. It also has native ETags and conditional writes. At bigger scale (per-user feeds, history, queries) I'd move to DynamoDB with one item per tweet.</div></div>
+
+<div class="qa"><div class="q">Q3. Why Pusher instead of your own WebSocket server?</div>
+<div class="a">Vercel functions are short-lived and can't hold thousands of open connections. Running my own socket server would mean a separate always-on machine, scaling and reconnect logic. Pusher is managed and handles fan-out. Its free tier allows 200k messages a day, far more than ~1,000 tweets.</div></div>
+
+<div class="qa"><div class="q">Q4. Why not Server-Sent Events (SSE) or long polling?</div>
+<div class="a">Both need a server to hold the connection open, and serverless functions have execution time limits and are billed while they're running. Pusher moves that open connection off my backend.</div></div>
+
+<div class="qa"><div class="q">Q5. Walk me through what happens when a tweet is posted.</div>
+<div class="a">Provider POSTs to the webhook → secret check → normalize → merge into S3 with If-Match (de-dupe by ID) → publish to Pusher in chunks of 2 → extension receives it over WebSocket → checks seenIds → updates panel and badge → desktop notification.</div></div>
+
+<div class="qa"><div class="q">Q6. What if the extension was offline when a tweet was pushed?</div>
+<div class="a">Pusher doesn't replay. On reconnect, the extension makes one catch-up GET to <code>/api/tweets</code> with its last ETag. It gets the latest 50 tweets (or a 304 if nothing changed), and <code>seenIds</code> prevents duplicate alerts.</div></div>
+
+<div class="qa"><div class="q">Q7. What if Pusher goes down?</div>
+<div class="a">The socket's <code>onclose</code> handler switches the extension to polling every 10 s (with ETag) and retries Pusher every 5 s. Polling stops again once Pusher reconnects.</div></div>
+
+<h3>Data correctness</h3>
+<div class="qa"><div class="q">Q8. What is idempotency? Is your webhook idempotent?</div>
+<div class="a">An operation is idempotent if doing it twice has the same effect as doing it once. Yes: the merge de-dupes by tweet ID, so a retried delivery changes nothing, and I even skip the S3 write when nothing changed.</div></div>
+
+<div class="qa"><div class="q">Q9. Optimistic vs pessimistic locking: when would you pick each?</div>
+<div class="a">Optimistic (check the version at write time, retry) when conflicts are rare, as here. Pessimistic (take a lock first) when conflicts are frequent or a retry is very expensive. S3 has no locks, so optimistic fits naturally.</div></div>
+
+<div class="qa"><div class="q">Q10. What if the conditional write keeps failing?</div>
+<div class="a">I retry up to 6 times with increasing delay plus jitter. If all six fail, the webhook returns 500, so the provider retries the delivery later. Because the write is idempotent, that retry is safe.</div></div>
+
+<div class="qa"><div class="q">Q11. Is S3 eventually consistent? Could you read stale data?</div>
+<div class="a">Since December 2020, S3 gives strong read-after-write consistency for all operations. A GET after a successful PUT returns the new data. My reads also have a deliberate 1-second in-memory cache, so a feed can be up to ~1 s old. That's fine, because real-time delivery goes through Pusher.</div></div>
+
+<div class="qa"><div class="q">Q12. How do you keep tweets in order?</div>
+<div class="a">New tweets are put at the front of the list (newest first), and the list is capped at 1,000. The extension merges incoming tweets ahead of its history and de-dupes. For strict ordering you'd sort by <code>created_at</code>, but arrival order is good enough for a news feed.</div></div>
+
+<div class="qa"><div class="q">Q13. Why normalize on the server and not in the extension?</div>
+<div class="a">A single source of truth. Every consumer (extension, dashboard, future apps) sees one clean shape, and fixing a parsing bug means one deploy instead of an extension update through the Web Store. The extension still normalizes defensively, in case an old payload reaches it.</div></div>
+
+<div class="qa"><div class="q">Q14. How do you delete old data? Is there a cron job?</div>
+<div class="a">No cron. The cutoff "08:55 IST today" is computed by a shared function. The webhook drops old rows on write, the API hides them on read, and the extension purges its cache at an exact 08:55 alarm. Computing it everywhere means all layers agree to the second, and there's no job that can silently fail.</div></div>
+
+<h3>Performance and cost</h3>
+<div class="qa"><div class="q">Q15. How did you measure under 500 ms?</div>
+<div class="a">Server-side <code>received_at</code> timestamp vs extension receive time, sampled across a trading day, quoting p95. The S3 write is the biggest part (~100–200 ms), then the Pusher publish and the WebSocket hop. The X → provider leg is excluded, because it's not under my control.</div></div>
+
+<div class="qa"><div class="q">Q16. Does a 304 response cost anything?</div>
+<div class="a">It saves the body bytes, but the serverless function still runs, so it's still an invocation. That's exactly why I moved to push on top of ETags.</div></div>
+
+<div class="qa"><div class="q">Q17. How did you compute the ETag? Why not hash the whole body?</div>
+<div class="a">A DJB2 hash of the newest 20 tweet IDs. A tweet's content doesn't change once posted, so the list of IDs fully identifies the feed. Hashing IDs is cheaper than serializing and hashing the whole JSON.</div></div>
+
+<div class="qa"><div class="q">Q18. Why chunk Pusher events into 2 tweets?</div>
+<div class="a">Pusher messages are limited to 10 KB. A tweet with media URLs and metadata can be 2–4 KB, so 2 per event stays safely under the limit.</div></div>
+
+<div class="qa"><div class="q">Q19. What does the off-hours behaviour cost?</div>
+<div class="a">The provider has no pause button, so it still delivers overnight. The webhook replies with a fast 200 without touching S3, and an optional Cloudflare Worker can answer at the edge so Vercel isn't even invoked. Off-hours GETs without <code>force</code> get a CDN-cached empty response (<code>s-maxage=300</code>).</div></div>
+
+<div class="qa"><div class="q">Q20. Why does the extension send <code>?force=1</code>?</div>
+<div class="a">The CDN caches by URL. Without it, a "market closed" response cached at 08:59 could be served back at 09:00, after the market opened. The extension already decides when to poll, so it bypasses that cache. This was a real bug and is a good story.</div></div>
+
+<h3>Security</h3>
+<div class="qa"><div class="q">Q21. How do you stop someone injecting fake "breaking news"?</div>
+<div class="a">The webhook needs a secret, compared with <code>crypto.timingSafeEqual</code> so attackers can't guess it character by character from response times. With no secret configured, the route refuses all writes, so it fails closed. The feed endpoint checks a poll token or client ID.</div></div>
+
+<div class="qa"><div class="q">Q22. Any security weaknesses you know of?</div>
+<div class="a">The secret travels in the URL (the provider's headers aren't documented), so it can end up in logs. I'd move to an HMAC signature header if the provider supports one. The Pusher channel is public. For paid or per-user data I'd use private channels with an auth endpoint. And the client ID check on the feed is weak, so a real per-user token would be better.</div></div>
+
+<h3>Scale and "what next"</h3>
+<div class="qa"><div class="q">Q23. How would this handle 10,000 users?</div>
+<div class="a">Reads scale fine: Pusher handles the fan-out, and the catch-up GET can sit behind a CDN keyed on ETag. Writes don't depend on user count, only on tweet volume. Beyond ~5 users I'd move to Pusher's paid tier for connection limits, and add per-user filtering (watchlists) with separate channels.</div></div>
+
+<div class="qa"><div class="q">Q24. And 1,000 accounts / 100k tweets a day?</div>
+<div class="a">The single-JSON-object store becomes the bottleneck: every write rewrites the whole file, and conflicts get frequent. I'd put a queue (SQS) between the webhook and storage, store one row per tweet in DynamoDB (conditional put on the tweet ID gives de-dupe for free), and have a worker that publishes to Pusher.</div></div>
+
+<div class="qa"><div class="q">Q25. What would you add for "market sentiment"?</div>
+<div class="a">A step after normalize that tags each tweet with a sentiment label (bullish / bearish / neutral) and the stocks mentioned, using an LLM or a finance-tuned classifier. Then filter alerts by the user's watchlist. Run it async, so it doesn't add to the 500 ms path.</div></div>
+
+<div class="qa"><div class="q">Q26. How do you test this?</div>
+<div class="a">curl a sample payload to the local webhook (file-store mode, no S3 needed), run the Pusher test script, and use the extension's console commands (<code>GET_STATUS</code>, <code>TEST_NOTIFICATION</code>). Next I'd add unit tests for <code>normalizePayload</code> covering every payload shape, and a test that fires two concurrent writes and checks both tweets are saved.</div></div>
+
+<h3>Behavioural</h3>
+<div class="qa"><div class="q">Q27. Hardest bug you faced?</div>
+<div class="a">Pick one and tell it as Situation → Cause → Fix → Result: (a) tweets credited to the wrong account because the matcher searched the tweet body; (b) the CDN serving a stale "closed" response at market open, fixed with <code>?force=1</code>; (c) the lost-update race on S3, fixed with If-Match.</div></div>
+
+<div class="qa"><div class="q">Q28. What trade-off are you least happy with?</div>
+<div class="a">Writing to S3 before pushing adds ~100–200 ms to delivery. I chose durability first, so no user sees a tweet the system then loses. If latency mattered more, I'd push and persist in parallel.</div></div>
+
+<div class="qa"><div class="q">Q29. Why did you build this?</div>
+<div class="a">Be genuine: for example, you or traders you know were missing market-moving headlines while switching tabs, and existing tools were noisy or slow. Keep it to two sentences.</div></div>
+
+<div class="qa"><div class="q">Q30. If you started again, what would you change?</div>
+<div class="a">Start with push from day one instead of polling, store one record per tweet instead of one big file, and add latency and error metrics (p50/p95 delivery time) from the start.</div></div>
+</section>
+
+<!-- ═════════════════════════ 14. WEAK SPOTS ═════════════════════════ -->
+<section class="page-break">
+<h2>14. Weak spots, trade-offs and what you'd improve</h2>
+<div class="box hi"><span class="tag">Samjho</span>
+Senior interviewers ko yeh sunna achha lagta hai ki aap apne system ki <b>kamzoriyan khud jaante ho</b>. Inko pehle hi mention kar do ("one trade-off I made was…"), toh woh trap ki tarah nahi lagega.
+</div>
+<table>
+  <tr><th>Weak spot</th><th>Why it's OK for now</th><th>Fix at scale</th></tr>
+  <tr><td>One JSON object holds the whole day</td><td>~1,000 tweets, a few hundred KB, rare conflicts</td><td>DynamoDB, one item per tweet, or a key per day/hour</td></tr>
+  <tr><td>Push happens after the S3 write</td><td>Durability first; still under 500 ms</td><td>Push and persist in parallel</td></tr>
+  <tr><td>Pusher doesn't replay messages</td><td>Catch-up GET on reconnect covers the gap</td><td>A replay-capable stream (Ably history, Kafka) if strict delivery is needed</td></tr>
+  <tr><td>Public Pusher channel</td><td>Public news, no user data</td><td>Private channels plus an auth endpoint</td></tr>
+  <tr><td>Webhook secret in URL</td><td>The provider doesn't document signature headers</td><td>HMAC signature verification</td></tr>
+  <tr><td>No queue between webhook and store</td><td>Low volume; provider retries on 500</td><td>SQS + worker to absorb bursts</td></tr>
+  <tr><td>Latency not continuously tracked</td><td>Measured by sampling</td><td>Log p50/p95 delivery time per tweet</td></tr>
+</table>
+</section>
+
+<!-- ═════════════════════════ 15. CHEAT SHEET ═════════════════════════ -->
+<section>
+<h2>15. One-page cheat sheet</h2>
+<table>
+  <tr><th style="width:28%">Term</th><th>One-line meaning (say this)</th></tr>
+  <tr><td>Ingestion pipeline</td><td>The steps that bring outside data in: receive → check → clean → de-dupe → store → broadcast.</td></tr>
+  <tr><td>Webhook</td><td>The provider calls my URL when there's new data. Push, not pull.</td></tr>
+  <tr><td>Normalize</td><td>Convert every payload shape into one standard tweet object.</td></tr>
+  <tr><td>De-duplicate</td><td>Keep each tweet once, using a Set of tweet IDs (server and extension).</td></tr>
+  <tr><td>Idempotent</td><td>Doing it twice = doing it once. Safe for retries.</td></tr>
+  <tr><td>ETag</td><td>A version fingerprint of the data.</td></tr>
+  <tr><td>304 Not Modified</td><td>"You already have the latest." Empty body.</td></tr>
+  <tr><td>If-None-Match</td><td>Read header: "send it only if it changed from this ETag."</td></tr>
+  <tr><td>If-Match</td><td>Write header: "save only if it's still this ETag," else 412.</td></tr>
+  <tr><td>Optimistic concurrency</td><td>No locks. Check the version at write time, retry on conflict.</td></tr>
+  <tr><td>Lost update</td><td>Two writers read the same version and the second overwrites the first.</td></tr>
+  <tr><td>Jitter</td><td>A random wait before retrying, so writers don't collide again.</td></tr>
+  <tr><td>WebSocket</td><td>A connection that stays open, so the server can send messages any time.</td></tr>
+  <tr><td>Pusher</td><td>A managed WebSocket service. My server calls <code>trigger()</code>, Pusher fans out to clients.</td></tr>
+  <tr><td>Event-driven</td><td>Work happens only when something happens (a new tweet), not on a timer.</td></tr>
+  <tr><td>Serverless invocation</td><td>One run of a function, each counted and billed.</td></tr>
+  <tr><td>MV3 service worker</td><td>The extension background script. Chrome can stop it, so state goes in storage and timing uses alarms.</td></tr>
+  <tr><td>p95 latency</td><td>95% of requests are faster than this number.</td></tr>
+</table>
+
+<h3>Numbers to remember</h3>
+<ul>
+  <li><span class="num">&lt;500 ms</span> webhook → extension (S3 ~100–200 ms is the biggest part)</li>
+  <li><span class="num">1,000</span> max tweets kept per day · <span class="num">50</span> per API response · <span class="num">5</span> shown in the panel</li>
+  <li><span class="num">6</span> conditional-write retries with 40–100 ms jitter · <span class="num">1 s</span> read cache</li>
+  <li><span class="num">2</span> tweets per Pusher event (10 KB limit) · <span class="num">10 s</span> fallback poll · <span class="num">5 s</span> reconnect</li>
+  <li><span class="num">9:00–15:30 IST</span> active (+5 min grace) · wiped at <span class="num">08:55</span> · <span class="num">5 min</span> manual ON</li>
+  <li><span class="num">43,200 × 250 KB ≈ 10.8 GB</span> before → <span class="num">~1,000 × 1 KB ≈ 1 MB</span> after</li>
+</ul>
+
+<div class="box say"><span class="tag">Closing line</span>
+"The main lesson was to match the design to how the data actually behaves. Tweets are rare, unpredictable events, so pushing them beats polling for them. And with retries and concurrent webhooks, correctness came from two small ideas: idempotent writes and optimistic concurrency."
+</div>
+</section>
+
+</body>
+</html>

@@ -86,6 +86,7 @@ const ACCOUNT_META = {
   soumeetsarkar: 'Soumeet Sarkar',
   soumeet_sarkar: 'Soumeet Sarkar',
   sharaddubey_: 'Sharad Dubey',
+  sharad9dubey: 'Sharad Dubey',
   lakshmanroy1: 'Lakshman Roy',
   shukla_tarun: 'Tarun Shukla',
 };
@@ -237,8 +238,8 @@ function pushStatus(reason = '') {
   pushToPanel({ type: 'STATUS', ...statusPayload(), reason });
 }
 
-function pushFeed(newCount = 0) {
-  pushToPanel({ type: 'FEED', tweets: tweetHistory, newCount });
+function pushFeed(newCount = 0, newTweets = []) {
+  pushToPanel({ type: 'FEED', tweets: tweetHistory, newCount, newTweets });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -397,7 +398,7 @@ async function pollOnce() {
 
     tweetHistory = incoming.slice(0, MAX_HISTORY);
     await saveState();
-    pushFeed(isFirstLoad ? 0 : newTweets.length);
+    pushFeed(isFirstLoad ? 0 : newTweets.length, isFirstLoad ? [] : newTweets);
 
     if (!isFirstLoad && newTweets.length > 0) {
       console.log(
@@ -570,7 +571,7 @@ async function handleRealtimeTweets(rawTweets) {
   tweetHistory = unique.slice(0, MAX_HISTORY);
   await saveState();
 
-  pushFeed(newTweets.length);
+  pushFeed(newTweets.length, newTweets);
   console.log(
     `[X-Monitor Pusher] ⚡ Instant delivery: +${newTweets.length} — @${newTweets[0].author.username}: "${newTweets[0].text.slice(0, 60)}"`
   );
