@@ -71,24 +71,42 @@ export async function POST(request) {
   try {
     const tweets = normalizePayload(payload);
     if (tweets.length === 0) return NextResponse.json({ status: 'ok', stored: 0 });
-    await addTweets(tweets);
-    console.log(`[webhook] Stored ${tweets.length} tweet(s) from rule "${payload.rule_tag || '—'}"`);
 
-    // Real-time push via Pusher (instant delivery to Chrome extension)
-    if (pusher) {
-      try {
-        // Chunk to max 2 tweets per event to guarantee payload is always well below Pusher's 10KB limit
-        for (let i = 0; i < tweets.length; i += 2) {
-          const chunk = tweets.slice(i, i + 2);
-          await pusher.trigger('x-monitor', 'new-tweets', { tweets: chunk });
-        }
-        console.log(`[webhook] Pushed ${tweets.length} tweet(s) to Pusher channel 'x-monitor'`);
-      } catch (pushErr) {
-        console.error('[webhook] Failed to push to Pusher:', pushErr);
-      }
-    }
+    // ── Fire Pusher FIRST, in parallel with S3 store ────────────────────
+    // The extension doesn't need the S3 write to succeed — it gets tweets
+    // directly from the Pusher event. Pushing before (or alongside) the
+    // store shaves ~300-800ms off the end-to-end delivery latency.
+    const pusherPromise = pusher
+      ? (async () => {
+          try {
+            const chunks = [];
+            for (let i = 0; i < tweets.length; i += 2) {
+              chunks.push(tweets.slice(i, i + 2));
+            }
+            // Fire all chunks in parallel instead of sequential awaits
+            await Promise.all(
+              chunks.map((chunk) =>
+                pusher.trigger('x-monitor', 'new-tweets', { tweets: chunk })
+              )
+            );
+            console.log(`[webhook] Pushed ${tweets.length} tweet(s) to Pusher channel 'x-monitor'`);
+            return true;
+          } catch (pushErr) {
+            console.error('[webhook] Failed to push to Pusher:', pushErr);
+            return false;
+          }
+        })()
+      : Promise.resolve(false);
 
-    return NextResponse.json({ status: 'ok', stored: tweets.length, pushed: Boolean(pusher) });
+    // S3 store runs concurrently with Pusher — neither blocks the other
+    const storePromise = addTweets(tweets).then((list) => {
+      console.log(`[webhook] Stored ${tweets.length} tweet(s) from rule "${payload.rule_tag || '—'}"`);
+      return list;
+    });
+
+    const [pushed] = await Promise.all([pusherPromise, storePromise]);
+
+    return NextResponse.json({ status: 'ok', stored: tweets.length, pushed });
   } catch (err) {
     console.error('[webhook] Error processing webhook:', err);
     // 500 so TwitterAPI.io (if it retries) tries again rather than dropping the batch.

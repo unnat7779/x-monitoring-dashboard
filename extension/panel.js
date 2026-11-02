@@ -190,26 +190,49 @@ function handlePortMessage(msg) {
   }
 }
 
-function isYatinOrSoumeet(tweet) {
+const ANALYST_HANDLES = new Set([
+  'yatinmota',
+  'darshanvmehta1',
+  'soumeetsarkar',
+  'soumeet_sarkar',
+  'sharaddubey_',
+  'sharad9dubey',
+  'lakshmanroy1',
+  'shukla_tarun',
+]);
+
+const ANALYST_IDS = new Set([
+  '1933369219',          // Yatin Mota
+  '728571299228876800',  // Soumeet Sarkar
+  '2859443173',          // Darshan Mehta
+  '1077676619349712900', // Sharad Dubey (TwitterAPI.io)
+  '1077676619349712896', // Sharad Dubey
+]);
+
+function isPriorityAnalyst(tweet) {
   if (!tweet) return false;
-  const username = (tweet.author?.username || '').replace(/^@/, '').toLowerCase();
-  if (
-    username === 'yatinmota' ||
-    username === 'soumeet_sarkar' ||
-    username === 'soumeetsarkar'
-  ) {
-    return true;
-  }
-  const id = String(tweet.author?.id || tweet.userId || tweet.author_id || '');
-  if (id === '1933369219' || id === '728571299228876800') {
-    return true;
-  }
+  const username = (tweet.author?.username || '').replace(/^@/, '').toLowerCase().trim();
+  if (ANALYST_HANDLES.has(username)) return true;
+
+  const id = String(tweet.author?.id || tweet.userId || tweet.author_id || '').trim();
+  if (ANALYST_IDS.has(id)) return true;
+
   const name = (tweet.author?.name || '').toLowerCase();
-  if (name.includes('yatin') || name.includes('soumeet')) {
+  if (
+    name.includes('yatin') ||
+    name.includes('soumeet') ||
+    name.includes('darshan') ||
+    name.includes('sharad') ||
+    name.includes('lakshman') ||
+    name.includes('tarun shukla')
+  ) {
     return true;
   }
   return false;
 }
+
+// Keep backward compatibility alias
+const isYatinOrSoumeet = isPriorityAnalyst;
 
 function applyStatus(s) {
   if (s.mode === 'auto' || s.mode === 'on') state.mode = s.mode;
@@ -233,9 +256,9 @@ function applyTweets(tweets, newCount, incomingNewTweets = []) {
       ? incomingNewTweets
       : (Array.isArray(tweets) ? tweets.slice(0, newCount) : []);
 
-    const hasPriorityAnalyst = freshTweets.some(isYatinOrSoumeet);
+    const hasPriorityAnalyst = freshTweets.some(isPriorityAnalyst);
     if (hasPriorityAnalyst) {
-      const analystTweet = freshTweets.find(isYatinOrSoumeet);
+      const analystTweet = freshTweets.find(isPriorityAnalyst);
       const name = analystTweet?.author?.name || 'Analyst';
       showToast(freshTweets.length === 1 ? `⚡ ${name} posted` : `⚡ ${name} + ${freshTweets.length - 1} new posts`);
       playAnalystChime();
@@ -327,30 +350,77 @@ toastClose.addEventListener('click', () => {
   if (toastTimer) clearTimeout(toastTimer);
 });
 
+// ── Web Audio Context Singleton ──────────────────────────────────────────
+let sharedAudioCtx = null;
+
+function getAudioContext() {
+  try {
+    if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtxClass) return null;
+      sharedAudioCtx = new AudioCtxClass();
+    }
+    if (sharedAudioCtx.state === 'suspended') {
+      sharedAudioCtx.resume().catch(() => {});
+    }
+    return sharedAudioCtx;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Unlock audio on user interaction in panel window
+if (typeof window !== 'undefined') {
+  ['click', 'keydown', 'pointerdown'].forEach((evt) => {
+    window.addEventListener(
+      evt,
+      () => {
+        try {
+          if (sharedAudioCtx && sharedAudioCtx.state === 'suspended') {
+            sharedAudioCtx.resume().catch(() => {});
+          } else if (!sharedAudioCtx) {
+            getAudioContext();
+          }
+        } catch {}
+      },
+      { passive: true }
+    );
+  });
+}
+
 function playDefaultChime() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const t0 = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-    gain.gain.setValueAtTime(0.001, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+    osc.frequency.setValueAtTime(587.33, t0); // D5
+    gain.gain.setValueAtTime(0.001, t0);
+    gain.gain.linearRampToValueAtTime(0.08, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.25);
     osc.connect(gain);
     gain.connect(ctx.destination);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.25);
+    osc.start(t0);
+    osc.stop(t0 + 0.25);
   } catch (e) {
     // audio unavailable
   }
 }
 
-// Distinct signature sound for Yatin Mota & Soumeet Sarkar:
+// Distinct signature sound for Analysts (Yatin Mota, Soumeet Sarkar, Sharad Dubey, Darshan Mehta):
 // Two-tone ascending harmonic alert (A5 880 Hz -> E6 1318.5 Hz)
 function playAnalystChime() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
     const t0 = ctx.currentTime;
 
     // Tone 1: 880 Hz (A5)
@@ -385,7 +455,7 @@ function playAnalystChime() {
 }
 
 function playChime(tweets = []) {
-  if (Array.isArray(tweets) && tweets.some(isYatinOrSoumeet)) {
+  if (Array.isArray(tweets) && tweets.some(isPriorityAnalyst)) {
     playAnalystChime();
   } else {
     playDefaultChime();
@@ -396,7 +466,10 @@ function playChime(tweets = []) {
 if (typeof window !== 'undefined') {
   window.playDefaultChime = playDefaultChime;
   window.playAnalystChime = playAnalystChime;
+  window.playChime = playChime;
+  window.isPriorityAnalyst = isPriorityAnalyst;
   window.isYatinOrSoumeet = isYatinOrSoumeet;
+  window.getAudioContext = getAudioContext;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

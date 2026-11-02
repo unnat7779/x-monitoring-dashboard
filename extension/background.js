@@ -273,6 +273,7 @@ function normalizeTweet(t) {
     text: asText(t.text || t.full_text, 4000),
     created_at: new Date(Number.isNaN(ts) ? Date.now() : ts).toISOString(),
     author: {
+      id: asText(a.id || a.user_id || a.x_user_id || a.author_id || t.user_id || t.author_id, 64),
       name: asText(a.name, 100) || 'Unknown',
       username: asText(a.username || a.screen_name, 50).replace(/^@/, '') || 'unknown',
       verified: Boolean(a.verified || a.is_blue_verified),
@@ -397,8 +398,8 @@ async function pollOnce() {
     }
 
     tweetHistory = incoming.slice(0, MAX_HISTORY);
-    await saveState();
     pushFeed(isFirstLoad ? 0 : newTweets.length, isFirstLoad ? [] : newTweets);
+    saveState(); // non-blocking persistence
 
     if (!isFirstLoad && newTweets.length > 0) {
       console.log(
@@ -569,12 +570,16 @@ async function handleRealtimeTweets(rawTweets) {
     }
   }
   tweetHistory = unique.slice(0, MAX_HISTORY);
-  await saveState();
 
+  // Push to panel FIRST — the user sees the tweet instantly.
+  // Storage persistence is fire-and-forget; it doesn't block display.
   pushFeed(newTweets.length, newTweets);
   console.log(
     `[X-Monitor Pusher] ⚡ Instant delivery: +${newTweets.length} — @${newTweets[0].author.username}: "${newTweets[0].text.slice(0, 60)}"`
   );
+
+  // Persist state in background — non-blocking for the panel
+  saveState();
 
   if (!panelPort) {
     unreadCount += newTweets.length;
