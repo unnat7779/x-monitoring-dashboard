@@ -70,6 +70,7 @@ const state = {
   connected: false,    // last poll succeeded
   marketOpen: false,
   nextEdge: 0,         // epoch ms of next 9:00 / 15:30 IST
+  volume: 1.0,         // 0.0 to 1.0 (default 100%)
 };
 
 let expandedPostId = null;
@@ -86,6 +87,9 @@ const btnCount3 = document.getElementById('btn-count-3');
 const btnCount5 = document.getElementById('btn-count-5');
 const btnModeAuto = document.getElementById('btn-mode-auto');
 const btnModeOn = document.getElementById('btn-mode-on');
+const volumeSlider = document.getElementById('volume-slider');
+const btnVolumeMute = document.getElementById('btn-volume-mute');
+const volumeIcon = document.getElementById('volume-icon');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PORT TO THE WORKER
@@ -273,8 +277,13 @@ function applyTweets(tweets, newCount, incomingNewTweets = []) {
 // replaces it a moment later.
 async function paintFromStorage() {
   try {
-    const data = await chrome.storage.local.get(['tweetHistory', 'mode', 'manualOnUntil']);
+    const data = await chrome.storage.local.get(['tweetHistory', 'mode', 'manualOnUntil', 'alertVolume']);
     applyStatus({ mode: data.mode, manualOnUntil: data.manualOnUntil });
+    if (typeof data.alertVolume === 'number') {
+      setVolume(data.alertVolume, false);
+    } else {
+      setVolume(100, false);
+    }
     if (Array.isArray(data.tweetHistory)) applyTweets(data.tweetHistory, 0);
   } catch (e) {
     // extension context may be invalid
@@ -350,6 +359,80 @@ toastClose.addEventListener('click', () => {
   if (toastTimer) clearTimeout(toastTimer);
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// VOLUME CONTROLS
+// ═══════════════════════════════════════════════════════════════════════════
+
+let lastUnmutedVolume = 100;
+let volumePreviewTimer = null;
+
+function updateVolumeUI(valPercent) {
+  if (volumeSlider) {
+    volumeSlider.value = valPercent;
+    volumeSlider.title = `Volume: ${valPercent}%`;
+    volumeSlider.style.background = `linear-gradient(to right, #38bdf8 0%, #38bdf8 ${valPercent}%, rgba(255, 255, 255, 0.15) ${valPercent}%, rgba(255, 255, 255, 0.15) 100%)`;
+  }
+  if (volumeIcon) {
+    if (valPercent === 0) {
+      volumeIcon.innerHTML = `
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <line x1="23" y1="9" x2="17" y2="15"></line>
+        <line x1="17" y1="9" x2="23" y2="15"></line>
+      `;
+    } else if (valPercent <= 50) {
+      volumeIcon.innerHTML = `
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+      `;
+    } else {
+      volumeIcon.innerHTML = `
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+      `;
+    }
+  }
+}
+
+function setVolume(valPercent, save = true) {
+  const clamped = Math.max(0, Math.min(100, Math.round(valPercent)));
+  state.volume = clamped / 100;
+  if (clamped > 0) {
+    lastUnmutedVolume = clamped;
+  }
+  updateVolumeUI(clamped);
+  if (save) {
+    try {
+      chrome.storage.local.set({ alertVolume: clamped });
+    } catch (e) {}
+  }
+}
+
+if (volumeSlider) {
+  volumeSlider.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value, 10) || 0;
+    setVolume(val, true);
+  });
+
+  // Brief sample chime when the user finishes adjusting the slider
+  volumeSlider.addEventListener('change', () => {
+    clearTimeout(volumePreviewTimer);
+    volumePreviewTimer = setTimeout(() => {
+      playDefaultChime();
+    }, 60);
+  });
+}
+
+if (btnVolumeMute) {
+  btnVolumeMute.addEventListener('click', () => {
+    if (state.volume > 0) {
+      setVolume(0, true);
+    } else {
+      setVolume(lastUnmutedVolume || 100, true);
+    }
+  });
+}
+
 // ── Web Audio Context Singleton ──────────────────────────────────────────
 let sharedAudioCtx = null;
 
@@ -389,8 +472,11 @@ if (typeof window !== 'undefined') {
 }
 
 // Loud, crisp bell chime for media channels (CNBC-TV18, NDTV Profit, etc.)
-// Dual-tone harmonic chime (587.33 Hz D5 + 1174.66 Hz D6 overtone) with high gain (0.35 + 0.15)
+// Dual-tone harmonic chime (587.33 Hz D5 + 1174.66 Hz D6 overtone) with controllable volume
 function playDefaultChime() {
+  const vol = typeof state.volume === 'number' ? state.volume : 1.0;
+  if (vol <= 0) return;
+
   try {
     const ctx = getAudioContext();
     if (!ctx) return;
@@ -405,7 +491,7 @@ function playDefaultChime() {
     osc1.type = 'sine';
     osc1.frequency.setValueAtTime(587.33, t0);
     gain1.gain.setValueAtTime(0.001, t0);
-    gain1.gain.linearRampToValueAtTime(0.35, t0 + 0.012);
+    gain1.gain.linearRampToValueAtTime(0.35 * vol, t0 + 0.012);
     gain1.gain.exponentialRampToValueAtTime(0.001, t0 + 0.40);
     osc1.connect(gain1);
     gain1.connect(ctx.destination);
@@ -418,7 +504,7 @@ function playDefaultChime() {
     osc2.type = 'sine';
     osc2.frequency.setValueAtTime(1174.66, t0);
     gain2.gain.setValueAtTime(0.001, t0);
-    gain2.gain.linearRampToValueAtTime(0.15, t0 + 0.01);
+    gain2.gain.linearRampToValueAtTime(0.15 * vol, t0 + 0.01);
     gain2.gain.exponentialRampToValueAtTime(0.001, t0 + 0.28);
     osc2.connect(gain2);
     gain2.connect(ctx.destination);
@@ -430,8 +516,11 @@ function playDefaultChime() {
 }
 
 // Distinct signature loud alert for Analysts (Yatin Mota, Soumeet Sarkar, Sharad Dubey, Darshan Mehta):
-// Two-tone ascending harmonic alert (A5 880 Hz -> E6 1318.5 Hz) with high gain (0.35 -> 0.40)
+// Two-tone ascending harmonic alert (A5 880 Hz -> E6 1318.5 Hz) with controllable volume
 function playAnalystChime() {
+  const vol = typeof state.volume === 'number' ? state.volume : 1.0;
+  if (vol <= 0) return;
+
   try {
     const ctx = getAudioContext();
     if (!ctx) return;
@@ -446,7 +535,7 @@ function playAnalystChime() {
     osc1.type = 'sine';
     osc1.frequency.setValueAtTime(880, t0);
     gain1.gain.setValueAtTime(0.001, t0);
-    gain1.gain.linearRampToValueAtTime(0.35, t0 + 0.015);
+    gain1.gain.linearRampToValueAtTime(0.35 * vol, t0 + 0.015);
     gain1.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22);
     osc1.connect(gain1);
     gain1.connect(ctx.destination);
@@ -460,7 +549,7 @@ function playAnalystChime() {
     osc2.type = 'sine';
     osc2.frequency.setValueAtTime(1318.51, t1);
     gain2.gain.setValueAtTime(0.001, t1);
-    gain2.gain.linearRampToValueAtTime(0.40, t1 + 0.015);
+    gain2.gain.linearRampToValueAtTime(0.40 * vol, t1 + 0.015);
     gain2.gain.exponentialRampToValueAtTime(0.001, t1 + 0.45);
     osc2.connect(gain2);
     gain2.connect(ctx.destination);
@@ -487,6 +576,7 @@ if (typeof window !== 'undefined') {
   window.isPriorityAnalyst = isPriorityAnalyst;
   window.isYatinOrSoumeet = isYatinOrSoumeet;
   window.getAudioContext = getAudioContext;
+  window.setVolume = setVolume;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
