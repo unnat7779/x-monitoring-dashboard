@@ -388,6 +388,8 @@ if (typeof window !== 'undefined') {
   });
 }
 
+// Loud, crisp bell chime for media channels (CNBC-TV18, NDTV Profit, etc.)
+// Dual-tone harmonic chime (587.33 Hz D5 + 1174.66 Hz D6 overtone) with high gain (0.35 + 0.15)
 function playDefaultChime() {
   try {
     const ctx = getAudioContext();
@@ -396,24 +398,39 @@ function playDefaultChime() {
       ctx.resume().catch(() => {});
     }
     const t0 = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, t0); // D5
-    gain.gain.setValueAtTime(0.001, t0);
-    gain.gain.linearRampToValueAtTime(0.08, t0 + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.25);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(t0);
-    osc.stop(t0 + 0.25);
+
+    // Fundamental tone: D5 (587.33 Hz)
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(587.33, t0);
+    gain1.gain.setValueAtTime(0.001, t0);
+    gain1.gain.linearRampToValueAtTime(0.35, t0 + 0.012);
+    gain1.gain.exponentialRampToValueAtTime(0.001, t0 + 0.40);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(t0);
+    osc1.stop(t0 + 0.40);
+
+    // Bright overtone: D6 (1174.66 Hz) for cutting through speaker noise
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1174.66, t0);
+    gain2.gain.setValueAtTime(0.001, t0);
+    gain2.gain.linearRampToValueAtTime(0.15, t0 + 0.01);
+    gain2.gain.exponentialRampToValueAtTime(0.001, t0 + 0.28);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(t0);
+    osc2.stop(t0 + 0.28);
   } catch (e) {
     // audio unavailable
   }
 }
 
-// Distinct signature sound for Analysts (Yatin Mota, Soumeet Sarkar, Sharad Dubey, Darshan Mehta):
-// Two-tone ascending harmonic alert (A5 880 Hz -> E6 1318.5 Hz)
+// Distinct signature loud alert for Analysts (Yatin Mota, Soumeet Sarkar, Sharad Dubey, Darshan Mehta):
+// Two-tone ascending harmonic alert (A5 880 Hz -> E6 1318.5 Hz) with high gain (0.35 -> 0.40)
 function playAnalystChime() {
   try {
     const ctx = getAudioContext();
@@ -429,26 +446,26 @@ function playAnalystChime() {
     osc1.type = 'sine';
     osc1.frequency.setValueAtTime(880, t0);
     gain1.gain.setValueAtTime(0.001, t0);
-    gain1.gain.linearRampToValueAtTime(0.09, t0 + 0.015);
-    gain1.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
+    gain1.gain.linearRampToValueAtTime(0.35, t0 + 0.015);
+    gain1.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22);
     osc1.connect(gain1);
     gain1.connect(ctx.destination);
     osc1.start(t0);
-    osc1.stop(t0 + 0.18);
+    osc1.stop(t0 + 0.22);
 
-    // Tone 2: 1318.51 Hz (E6) - crisp ascending alert
-    const t1 = t0 + 0.11;
+    // Tone 2: 1318.51 Hz (E6) - loud crisp ascending alert
+    const t1 = t0 + 0.12;
     const osc2 = ctx.createOscillator();
     const gain2 = ctx.createGain();
     osc2.type = 'sine';
     osc2.frequency.setValueAtTime(1318.51, t1);
     gain2.gain.setValueAtTime(0.001, t1);
-    gain2.gain.linearRampToValueAtTime(0.11, t1 + 0.015);
-    gain2.gain.exponentialRampToValueAtTime(0.001, t1 + 0.35);
+    gain2.gain.linearRampToValueAtTime(0.40, t1 + 0.015);
+    gain2.gain.exponentialRampToValueAtTime(0.001, t1 + 0.45);
     osc2.connect(gain2);
     gain2.connect(ctx.destination);
     osc2.start(t1);
-    osc2.stop(t1 + 0.35);
+    osc2.stop(t1 + 0.45);
   } catch (e) {
     // audio unavailable
   }

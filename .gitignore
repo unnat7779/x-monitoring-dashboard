@@ -47,3 +47,8 @@ logs/
 
 # holds the TwitterAPI.io key
 extension/config.js
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
